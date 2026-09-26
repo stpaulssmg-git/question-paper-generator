@@ -2258,7 +2258,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
         <h2>1. Import Question Bank</h2>
         <p>Importing for: <b><?= h($activeOwner['display_name']) ?></b> — <?= h($activeOwner['subject']) ?></p>
         <p>Required: <b>QNo, Chapter, Category, Question, Marks</b></p>
-        <form method="post" enctype="multipart-form-data" id="import-bank-form">
+        <form method="post" enctype="multipart/form-data" id="import-bank-form">
             <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
             <input type="hidden" name="import_bank" value="1">
             <?php if (isAdmin()): ?><input type="hidden" name="owner" value="<?= (int)$activeOwnerId ?>"><?php endif; ?>
