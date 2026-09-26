@@ -37,7 +37,7 @@ if (!file_exists($userFile)) {
     saveUsers([[
         'id' => 1,
         'username' => 'admin',
-        'password_hash' => password_hash('stpes2627', PASSWORD_DEFAULT),
+        'password_hash' => password_hash('admin123', PASSWORD_DEFAULT),
         'display_name' => 'Administrator',
         'subject' => 'All Subjects',
         'role' => 'admin',
