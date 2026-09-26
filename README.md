@@ -73,6 +73,7 @@ A lightweight, single-file PHP web application designed for schools and educator
    * **Default Username**: `admin`
    * **Default Password**: `admin123`
    > **Important**: Use the **Change Password** button in the top navigation bar immediately after your first login.
+   Note: If you are not able to login using admin user. Please delete the "data" folder and try login using "admin" and password "admin123". It will create a new users.json file.
 
 ---
 
