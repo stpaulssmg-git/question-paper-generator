@@ -283,7 +283,7 @@
         }
 
         // App configuration constants
-        define('APP_VERSION', 'v2.5.0');
+        define('APP_VERSION', 'v2.6.0');
         define('SCHOOL_NAME', "St. Paul's English School");
         define('ADDRESS', "NSD Compound, Savalanga Road");
         define('CITY_NAME', "Shivamogga");
@@ -756,19 +756,20 @@
             return '(' . implode('; ', $parts) . '; Total = ' . $totalMarks . ')';
         }
 
-        $csrf                     = csrfToken();
-        $message                  = '';
-        $messageType              = '';
-        $justAddedId              = null;
-        $editingBasketId          = null;
-        $editId                   = null;
-        $editBankId               = null;
-        $justEditedBankId         = null;
-        $scrollToBasket           = false;
-        $scrollToPreview          = false;
-        $scrollToCreateQuestion   = false;
-        $keepCreateQuestionOpen   = false;
-        $resetFiltersOnBankSwitch = false;
+        $csrf                       = csrfToken();
+        $message                    = '';
+        $messageType                = '';
+        $justAddedId                = null;
+        $editingBasketId            = null;
+        $editId                     = null;
+        $editBankId                 = null;
+        $justEditedBankId           = null;
+        $scrollToBasket             = false;
+        $scrollToPreview            = false;
+        $scrollToCreateQuestion     = false;
+        $scrollToAvailableQuestions = false;
+        $keepCreateQuestionOpen     = false;
+        $resetFiltersOnBankSwitch   = false;
 
         $questionBanks = getQuestionBanks($bankFolder);
 
@@ -794,6 +795,12 @@
             $_SESSION['section_heading']   = [];
             $_SESSION['creating_new_bank'] = false;
         }
+
+        // Trigger focus/scroll to Available Questions when a Question Bank is loaded via GET
+        if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['bank']) && $selectedBank !== '') {
+            $scrollToAvailableQuestions = true;
+        }
+
         $_SESSION['selected_bank'] = $selectedBank;
 
         $questions = [];
@@ -1271,9 +1278,10 @@
                             $questions = [];
                         }
                     }
-                    $resetFiltersOnBankSwitch = true;
-                    $scrollToBasket           = false;
-                    $message                  .= ' | Basket cleared and loaded Question Bank: ' . ($selectedBank ?: 'None');
+                    $resetFiltersOnBankSwitch   = true;
+                    $scrollToBasket             = false;
+                    $scrollToAvailableQuestions = ($selectedBank !== '');
+                    $message                   .= ' | Basket cleared and loaded Question Bank: ' . ($selectedBank ?: 'None');
                         }
                     } elseif ($afterSaveAction === 'load_paper' && $afterSaveTarget !== '') {
                         $chainedSaveMessage        = $message;
@@ -2676,7 +2684,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 </div>
 
 <?php if ($questions || $selectedBank !== '' || $isCreatingNewBank): ?>
-<div style="display: flex; align-items: center; justify-content: space-between;">
+<div id="available-questions-section" tabindex="-1" style="display: flex; align-items: center; justify-content: space-between; outline: none;">
     <h2>Available Questions</h2>
 </div>
 
@@ -3265,7 +3273,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
         <button class="primary" name="export_answers" form="export-form" style="font-size: 16px; padding: 8px 16px; background-color: #0056b3;">⬇ Generate Answer Key</button>
         <!-- FEATURE 4: Direct Print Trigger -->
         <button type="button" id="print-preview-btn" class="secondary" style="font-size: 16px; padding: 8px 16px;" onclick="window.print()">🖨️ Print Preview</button>
-        <button type="button" class="success" style="font-size: 16px; padding: 8px 16px; background-color: #28a745;" onclick="document.getElementById('saveModal').style.display='flex'">💾 Save QP</button>
+        <button type="button" class="success" style="font-size: 16px; padding: 8px 16px; background-color: #28a745;" onclick="openSaveModal()">💾 Save QP</button>
         <button class="secondary" name="clear_basket" form="export-form" formnovalidate style="font-size: 16px; padding: 8px 16px;" onclick="clearExpandedSectionsMemory()">Clear Basket</button>
     </div>
 </div>
@@ -3293,7 +3301,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
         <p class="small" style="margin-bottom:15px;">Enter a custom filename (without extension). If left blank, an automatic timestamped name will be used.</p>
         <input type="text" id="customFileNameInput" placeholder="e.g. Science_Midterm_Class10" style="width:100%; margin-bottom:15px; padding:8px; font-size:15px;">
         <div style="display:flex; justify-content:flex-end; gap:10px;">
-            <button type="button" class="secondary" onclick="document.getElementById('saveModal').style.display='none'">Cancel</button>
+            <button type="button" class="secondary" onclick="closeSaveModal()">Cancel</button>
             <button type="button" class="success" onclick="processSave()">Save Paper</button>
         </div>
     </div>
@@ -3306,11 +3314,9 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 <div id="unsavedBasketModal" class="modal-overlay">
     <div class="modal-content" style="width: 450px;">
         <h3 style="margin-top:0; color:#c62828;">⚠️ Unsaved Questions in Basket</h3>
-        <p id="unsavedBasketMessage" style="font-size:14px; line-height:1.45;">
+        <p id="unsavedBasketMessage" style="font-size:14px; line-height:1.45; margin-bottom:18px;">
             You currently have <b><?php echo count($basket) ?> question(s)</b> in your basket. Continuing will clear your current basket. Would you like to save your current Question Paper first?
         </p>
-        <label class="small" style="display:block; margin-bottom:4px; font-weight:bold;">Filename (if saving current QP):</label>
-        <input type="text" id="unsavedFileNameInput" placeholder="e.g. Science_Midterm_Class10 (optional)" style="width:100%; margin-bottom:15px; padding:8px; font-size:15px;">
         <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
             <button type="button" class="secondary" onclick="cancelUnsavedAction()">Cancel</button>
             <button type="button" class="danger" id="btnDiscardAndContinue" onclick="discardAndContinueAction()">🗑 Discard & Continue</button>
@@ -3679,31 +3685,36 @@ function discardAndContinueAction() {
     }
 }
 
-function saveAndContinueAction() {
-    let rawName = document.getElementById('unsavedFileNameInput').value.trim();
-    let safeName = rawName.replace(/[^A-Za-z0-9._ -]/g, '_').toLowerCase();
-
-    if (safeName !== '') {
-        if (existingFiles[currentDate] && existingFiles[currentDate].includes(safeName)) {
-            if (!confirm(`A file named "${safeName}.json" already exists in today's folder. Do you want to overwrite it?`)) {
-                return;
-            }
+function openSaveModal() {
+    pendingUnsavedAction = null;
+    pendingUnsavedTarget = null;
+    const saveModal = document.getElementById('saveModal');
+    const input = document.getElementById('customFileNameInput');
+    if (saveModal) {
+        saveModal.style.display = 'flex';
+        if (input) {
+            setTimeout(() => input.focus(), 50);
         }
     }
+}
 
-    clearExpandedSectionsMemory();
-    document.getElementById('hiddenCustomFilename').value = rawName;
-    document.getElementById('hiddenAfterSaveAction').value = pendingUnsavedAction || '';
-    document.getElementById('hiddenAfterSaveTarget').value = pendingUnsavedTarget ?? '';
+function closeSaveModal() {
+    document.getElementById('saveModal').style.display = 'none';
+    if (pendingUnsavedAction) {
+        cancelUnsavedAction();
+    }
+}
+
+function saveAndContinueAction() {
     document.getElementById('unsavedBasketModal').style.display = 'none';
-
-    const form = document.getElementById('export-form');
-    const submitTrigger = document.createElement('input');
-    submitTrigger.type = 'hidden';
-    submitTrigger.name = 'save_json';
-    submitTrigger.value = '1';
-    form.appendChild(submitTrigger);
-    form.submit();
+    const saveModal = document.getElementById('saveModal');
+    const input = document.getElementById('customFileNameInput');
+    if (saveModal) {
+        saveModal.style.display = 'flex';
+        if (input) {
+            setTimeout(() => input.focus(), 50);
+        }
+    }
 }
 
 function processSave() {
@@ -3718,9 +3729,13 @@ function processSave() {
         }
     }
 
+    if (pendingUnsavedAction) {
+        clearExpandedSectionsMemory();
+    }
+
     document.getElementById('hiddenCustomFilename').value = rawName;
-    document.getElementById('hiddenAfterSaveAction').value = '';
-    document.getElementById('hiddenAfterSaveTarget').value = '';
+    document.getElementById('hiddenAfterSaveAction').value = pendingUnsavedAction || '';
+    document.getElementById('hiddenAfterSaveTarget').value = pendingUnsavedTarget ?? '';
     document.getElementById('saveModal').style.display = 'none';
 
     const form = document.getElementById('export-form');
@@ -3741,6 +3756,17 @@ document.addEventListener("DOMContentLoaded", function() {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 confirmSaveNewBankAndSubmit();
+            }
+        });
+    }
+
+    // Allow pressing Enter inside the Save Question Paper modal input
+    const customFileInput = document.getElementById('customFileNameInput');
+    if (customFileInput) {
+        customFileInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                processSave();
             }
         });
     }
@@ -3924,6 +3950,18 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 });
 </script>
+
+<?php if ($scrollToAvailableQuestions && ! $scrollToCreateQuestion && $editingBasketId === null && ! $scrollToPreview && ! $scrollToBasket && $justEditedBankId === null): ?>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const availableSec = document.getElementById("available-questions-section");
+    if (availableSec) {
+        availableSec.scrollIntoView({ behavior: "smooth", block: "start" });
+        availableSec.focus({ preventScroll: true });
+    }
+});
+</script>
+<?php endif; ?>
 
 <?php if ($scrollToCreateQuestion): ?>
 <script>
