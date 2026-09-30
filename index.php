@@ -312,7 +312,7 @@
             $clean = preg_replace('/\s+on[a-z]+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $clean) ?? $clean;
             $clean = preg_replace('/javascript\s*:/i', '', $clean) ?? $clean;
 
-            // Only allow embedded data images (used for MathJax equations) so
+            // Only allow embedded data images so
             // externally supplied image URLs cannot be stored in question text.
             $clean = preg_replace_callback('/<img\b([^>]*)>/i', function ($m) {
                 $attrs = $m[1];
@@ -969,10 +969,19 @@
         $savedPapersList   = [];
         $existingFileNames = [];
         if (is_dir($savedPapersFolder)) {
-            $files = glob($savedPapersFolder . '/*/*.json') ?: [];
+            // New QPs are stored directly in the user's folder. Also read legacy
+            // date-based subfolders so previously saved papers remain available.
+            $files = array_merge(
+                glob($savedPapersFolder . '/*.json') ?: [],
+                glob($savedPapersFolder . '/*/*.json') ?: []
+            );
+            $files = array_values(array_unique($files));
             usort($files, function ($a, $b) {return filemtime($b) <=> filemtime($a);});
             foreach ($files as $file) {
-                $relPath           = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . basename(dirname($file)) . '/' . basename($file);
+                $relativeName = (dirname($file) === $savedPapersFolder)
+                    ? basename($file)
+                    : basename(dirname($file)) . '/' . basename($file);
+                $relPath           = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . $relativeName;
                 $dateLabel         = date('Y-m-d H:i', filemtime($file));
                 $savedPapersList[] = [
                     'path'  => $relPath,
@@ -1361,39 +1370,48 @@
                         mkdir($saveFolder, 0755, true);
                     }
 
-                    $dateFolder = date('Y-m-d');
-                    $subFolder  = $saveFolder . '/' . $dateFolder;
-                    if (! is_dir($subFolder)) {
-                        mkdir($subFolder, 0755, true);
-                    }
-
+                    // Store every new QP directly in the user's folder. Do not create
+                    // a new folder for each day. A timestamp is always included in the filename.
+                    $timestamp      = date('Ymd_His');
                     $customFileName = trim($_POST['custom_filename'] ?? '');
 
                     if ($customFileName !== '') {
                         $safeCustomName = preg_replace('/[^A-Za-z0-9._ -]/', '_', $customFileName);
-                        $fileName       = $safeCustomName;
-                        if (strtolower(pathinfo($fileName, PATHINFO_EXTENSION)) !== 'json') {
-                    $fileName .= '.json';
-                        }
+                        $safeCustomName = preg_replace('/\.json$/i', '', $safeCustomName);
+                        $fileName       = $safeCustomName . '_' . $timestamp . '.json';
                     } else {
-                        $fileName = 'QuestionPaper_' . date('Ymd_His') . '.json';
+                        $fileName = 'QuestionPaper_' . $timestamp . '.json';
                     }
 
-                    $filePath = $subFolder . '/' . $fileName;
+                    // Avoid collisions if more than one save occurs within the same second.
+                    $filePath = $saveFolder . '/' . $fileName;
+                    $suffix   = 1;
+                    while (file_exists($filePath)) {
+                        $fileName = preg_replace('/\.json$/i', '', $fileName) . '_' . $suffix . '.json';
+                        $filePath = $saveFolder . '/' . $fileName;
+                        $suffix++;
+                    }
 
                     file_put_contents($filePath, json_encode($paperData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
-                    $message     = 'Question paper successfully saved to your private folder: ' . h($activeOwner['display_name']) . '/' . $dateFolder . '/' . $fileName;
+                    $message     = 'Question paper successfully saved to your private folder: ' . h($activeOwner['display_name']) . '/' . $fileName;
                     $messageType = 'success';
 
                     // Refresh saved papers list for UI
                     $savedPapersList   = [];
                     $existingFileNames = [];
-                    $files             = glob($saveFolder . '/*/*.json') ?: [];
+                    $files             = array_merge(
+                        glob($saveFolder . '/*.json') ?: [],
+                        glob($saveFolder . '/*/*.json') ?: []
+                    );
+                    $files = array_values(array_unique($files));
                     if ($files) {
                         usort($files, function ($a, $b) {return filemtime($b) <=> filemtime($a);});
                         foreach ($files as $file) {
-                    $relPath           = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . basename(dirname($file)) . '/' . basename($file);
+                    $relativeName = (dirname($file) === $saveFolder)
+                        ? basename($file)
+                        : basename(dirname($file)) . '/' . basename($file);
+                    $relPath           = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . $relativeName;
                     $dateLabel         = date('Y-m-d H:i', filemtime($file));
                     $savedPapersList[] = ['path' => $relPath, 'label' => basename($file) . ' (' . $dateLabel . ')'];
 
@@ -1603,10 +1621,12 @@
                     }
                         }
 
-                        $loadedMsg      = 'Saved paper' . ($selectedBank !== '' && $bankWarning === '' ? ' and linked Question Bank (' . $selectedBank . ')' : '') . ' loaded successfully!' . $bankWarning;
-                        $message        = $chainedSaveMessage !== '' ? ($chainedSaveMessage . ' | ' . $loadedMsg) : $loadedMsg;
-                        $messageType    = $bankWarning === '' ? 'success' : 'error';
-                        $scrollToBasket = true;
+                        $loadedMsg   = 'Saved paper' . ($selectedBank !== '' && $bankWarning === '' ? ' and linked Question Bank (' . $selectedBank . ')' : '') . ' loaded successfully!' . $bankWarning;
+                        $message     = $chainedSaveMessage !== '' ? ($chainedSaveMessage . ' | ' . $loadedMsg) : $loadedMsg;
+                        $messageType = $bankWarning === '' ? 'success' : 'error';
+                        // After loading a QP, take the user directly to the generated preview.
+                        $scrollToPreview = true;
+                        $scrollToBasket  = false;
                     } else {
                         $message     = 'Invalid JSON paper format.';
                         $messageType = 'error';
@@ -1640,11 +1660,18 @@
                         // Refresh saved papers list after deletion
                         $savedPapersList   = [];
                         $existingFileNames = [];
-                        $files             = glob($savedPapersFolder . '/*/*.json') ?: [];
+                        $files             = array_merge(
+                    glob($savedPapersFolder . '/*.json') ?: [],
+                    glob($savedPapersFolder . '/*/*.json') ?: []
+                        );
+                        $files = array_values(array_unique($files));
                         if ($files) {
                     usort($files, function ($a, $b) {return filemtime($b) <=> filemtime($a);});
                     foreach ($files as $file) {
-                        $relPath                          = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . basename(dirname($file)) . '/' . basename($file);
+                        $relativeName = (dirname($file) === $savedPapersFolder)
+                            ? basename($file)
+                            : basename(dirname($file)) . '/' . basename($file);
+                        $relPath                          = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . $relativeName;
                         $dateLabel                        = date('Y-m-d H:i', filemtime($file));
                         $savedPapersList[]                = ['path' => $relPath, 'label' => basename($file) . ' (' . $dateLabel . ')'];
                         $folderName                       = basename(dirname($file));
@@ -2283,10 +2310,6 @@ h3 { font-size: 16px; color: #333; margin-top: 0; margin-bottom: 10px; }
     background: #fff !important;
     color: #222;
 }
-.ck-custom-math-tools { display:flex; flex-wrap:wrap; gap:5px; margin:4px 0 8px; }
-.ck-custom-math-tools button { background:#eef3f8; border:1px solid #b8c7d6; color:#1f3347; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:bold; cursor:pointer; }
-.ck-custom-math-tools button:hover { background:#dce8f3; }
-.ck-editor__editable_inline img.math-equation { max-height: 48px; vertical-align: middle; }
 
 .ck.ck-editor {
     margin-bottom: 10px;
@@ -3573,127 +3596,6 @@ let pendingUnsavedTarget = null;
 // --- CKEDITOR 5 MANAGEMENT FOR QUESTION EDITORS ---
 window.ckEditorsMap = new Map();
 
-function ensureMathJaxLoaded() {
-    if (window.MathJax && typeof window.MathJax.tex2svg === 'function') {
-        return Promise.resolve();
-    }
-    if (window.__mathJaxLoadPromise) return window.__mathJaxLoadPromise;
-    window.__mathJaxLoadPromise = new Promise((resolve, reject) => {
-        const existing = document.querySelector('script[data-mathjax-qpg]');
-        if (existing) {
-            existing.addEventListener('load', () => resolve(), {once:true});
-            existing.addEventListener('error', reject, {once:true});
-            return;
-        }
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
-        script.async = true;
-        script.setAttribute('data-mathjax-qpg', '1');
-        script.onload = () => resolve();
-        script.onerror = reject;
-        document.head.appendChild(script);
-    });
-    return window.__mathJaxLoadPromise;
-}
-
-function svgToDataUri(svg) {
-    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-}
-
-function insertHtmlIntoCkEditor(editor, html) {
-    try {
-        const viewFragment = editor.data.processor.toView(html);
-        const modelFragment = editor.data.toModel(viewFragment);
-        editor.model.change(writer => {
-            editor.model.insertContent(modelFragment, editor.model.document.selection);
-            writer.setSelection(editor.model.document.selection.getLastPosition());
-        });
-        editor.editing.view.focus();
-        return true;
-    } catch (err) {
-        console.error('CKEditor HTML insertion error:', err);
-        return false;
-    }
-}
-
-function insertMathEquation(editor) {
-    const latex = prompt('Enter the mathematical equation in LaTeX. Example: \\(x^2 + y^2 = z^2\\) or \\frac{a}{b}');
-    if (latex === null || latex.trim() === '') return;
-    ensureMathJaxLoaded().then(() => {
-        const wrapper = MathJax.tex2svg(latex.trim(), {display:false});
-        const svg = wrapper.querySelector('svg');
-        if (!svg) throw new Error('MathJax did not return an SVG equation.');
-        svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        const dataUri = svgToDataUri(svg.outerHTML);
-        if (editor.commands.get('insertImage')) {
-            editor.execute('insertImage', { source: dataUri, alt: 'Equation: ' + latex.trim() });
-            editor.editing.view.focus();
-        } else {
-            insertHtmlIntoCkEditor(editor, '<span>\\(' + latex.trim() + '\\)</span>');
-        }
-    }).catch(err => {
-        console.error(err);
-        alert('The equation tool could not load MathJax. Please check your internet connection.');
-    });
-}
-
-function chemicalFormulaToHtml(formula) {
-    let out = '';
-    let i = 0;
-    while (i < formula.length) {
-        const ch = formula[i];
-        if (ch === '^') {
-            let j = i + 1;
-            while (j < formula.length && /[+\-0-9]/.test(formula[j])) j++;
-            out += '<sup>' + formula.slice(i + 1, j) + '</sup>';
-            i = j;
-            continue;
-        }
-        if (ch === '_') {
-            let j = i + 1;
-            while (j < formula.length && /[0-9]+/.test(formula[j])) j++;
-            out += '<sub>' + formula.slice(i + 1, j) + '</sub>';
-            i = j;
-            continue;
-        }
-        if (/\d/.test(ch)) {
-            let j = i;
-            while (j < formula.length && /\d/.test(formula[j])) j++;
-            out += '<sub>' + formula.slice(i, j) + '</sub>';
-            i = j;
-            continue;
-        }
-        out += ch === ' ' ? '&nbsp;' : ch.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-        i++;
-    }
-    return out;
-}
-
-function insertChemicalFormula(editor) {
-    const formula = prompt('Enter the chemical formula. Example: H2SO4, Ca(OH)2, NH4+, SO4^2-');
-    if (formula === null || formula.trim() === '') return;
-    insertHtmlIntoCkEditor(editor, '<span class="chemical-formula">' + chemicalFormulaToHtml(formula.trim()) + '</span>');
-}
-
-function addMathTools(editor, textarea) {
-    const host = editor.ui.view.element;
-    if (!host || host.parentElement.querySelector('.ck-custom-math-tools')) return;
-    const tools = document.createElement('div');
-    tools.className = 'ck-custom-math-tools';
-    const makeButton = (label, title, fn) => {
-        const btn = document.createElement('button');
-        btn.type = 'button'; btn.textContent = label; btn.title = title;
-        btn.addEventListener('mousedown', e => e.preventDefault());
-        btn.addEventListener('click', () => fn(editor));
-        tools.appendChild(btn);
-    };
-    makeButton('∑ Equation', 'Insert a rendered mathematical equation', insertMathEquation);
-    makeButton('H₂O Formula', 'Insert a chemical formula with subscripts', insertChemicalFormula);
-    makeButton('x²', 'Apply superscript to the current selection', ed => ed.execute('superscript'));
-    makeButton('x₂', 'Apply subscript to the current selection', ed => ed.execute('subscript'));
-    host.parentElement.insertBefore(tools, host);
-}
-
 function initCkEditors() {
     if (typeof ClassicEditor === 'undefined') return;
     document.querySelectorAll('textarea.ck-question-editor').forEach(textarea => {
@@ -3702,13 +3604,12 @@ function initCkEditors() {
         ClassicEditor.create(textarea, {
             toolbar: [
                 'heading', '|', 'bold', 'italic', 'underline', 'strikethrough',
-                'subscript', 'superscript', 'link',
+                'link',
                 'bulletedList', 'numberedList', '|', 'outdent', 'indent',
                 'insertTable', 'blockQuote', 'undo', 'redo'
             ]
         }).then(editor => {
             window.ckEditorsMap.set(textarea, editor);
-            addMathTools(editor, textarea);
             editor.model.document.on('change:data', () => { textarea.value = editor.getData(); });
             textarea.value = editor.getData();
         }).catch(err => {
@@ -4447,15 +4348,14 @@ document.addEventListener("DOMContentLoaded", function() {
 document.addEventListener("DOMContentLoaded", function() {
     const previewSection = document.getElementById("preview-section");
     const previewContainer = document.getElementById("doc-preview-container");
-    const printPreviewBtn = document.getElementById("print-preview-btn");
-
     if (previewSection) {
         previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    if (printPreviewBtn) {
-        printPreviewBtn.focus({ preventScroll: true });
-    } else if (previewContainer) {
-        previewContainer.focus({ preventScroll: true });
+    // Keep keyboard focus on the QP preview itself after loading a saved QP.
+    if (previewContainer) {
+        setTimeout(function() {
+            previewContainer.focus({ preventScroll: true });
+        }, 120);
     }
 });
 </script>

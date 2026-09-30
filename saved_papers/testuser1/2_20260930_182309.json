@@ -5,10 +5,10 @@
         "paper_subtitle": "",
         "doc_font": "Cambria",
         "watermark_text": "",
-        "question_bank": "testqb.xlsx",
+        "question_bank": "10 QB.xlsx",
         "total_marks": 1,
         "total_questions": 1,
-        "generated_at": "2026-09-29 18:30:06"
+        "generated_at": "2026-09-30 18:23:09"
     },
     "sections": [
         {
@@ -16,17 +16,17 @@
             "section_heading": "MCQ",
             "questions": [
                 {
-                    "Chapter": "test chapter",
+                    "Chapter": "Ch1",
                     "QNo": "1",
                     "Category": "mcq",
                     "Marks": "1",
-                    "Difficulty": "easy",
-                    "Question": "question 123",
-                    "OptionA": "a",
-                    "OptionB": "b",
-                    "OptionC": "c",
-                    "OptionD": "d",
-                    "Answer": "d",
+                    "Difficulty": "",
+                    "Question": "<p>add the following 1+1=<\/p>",
+                    "OptionA": "2",
+                    "OptionB": "3",
+                    "OptionC": "4",
+                    "OptionD": "5",
+                    "Answer": "2",
                     "_BankId": 0
                 }
             ]
