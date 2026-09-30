@@ -200,6 +200,7 @@
         use PhpOffice\PhpWord\ComplexType\TblWidth;
         use PhpOffice\PhpWord\IOFactory as WordIOFactory;
         use PhpOffice\PhpWord\PhpWord;
+        use PhpOffice\PhpWord\Shared\Html as WordHtml;
         use PhpOffice\PhpWord\SimpleType\Jc;
 
         $loggedInUser = currentUser();
@@ -283,16 +284,88 @@
         }
 
         // App configuration constants
-        define('APP_VERSION', 'v2.6.0');
+        define('APP_VERSION', 'v2.7.0');
         define('SCHOOL_NAME', "St. Paul's English School");
         define('ADDRESS', "NSD Compound, Savalanga Road");
         define('CITY_NAME', "Shivamogga");
 
         /*
 |--------------------------------------------------------------------------
-| FINE-TUNED QUESTION PAPER GENERATOR (DYNAMIC COLUMNS)
+| FINE-TUNED QUESTION PAPER GENERATOR (DYNAMIC COLUMNS & CKEDITOR SUPPORT)
 |--------------------------------------------------------------------------
 */
+
+        /**
+         * Sanitizes HTML from CKEditor so only safe formatting tags are stored and rendered.
+         */
+        function sanitizeQuestionHtml(string $text): string
+        {
+            $text = trim($text);
+            if ($text === '') {
+                return '';
+            }
+
+            $allowedTags = '<p><br><b><strong><i><em><u><s><sub><sup><ul><ol><li><table><thead><tbody><tr><th><td><blockquote><span><h1><h2><h3><h4><figure><figcaption><img>';
+            $clean       = strip_tags($text, $allowedTags);
+
+            // Strip any inline on* event handlers or javascript: URLs
+            $clean = preg_replace('/\s+on[a-z]+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $clean) ?? $clean;
+            $clean = preg_replace('/javascript\s*:/i', '', $clean) ?? $clean;
+
+            // Only allow embedded data images (used for MathJax equations) so
+            // externally supplied image URLs cannot be stored in question text.
+            $clean = preg_replace_callback('/<img\b([^>]*)>/i', function ($m) {
+                $attrs = $m[1];
+                if (preg_match('/\bsrc\s*=\s*[\"\'](data:image\/[^;]+;base64,[^\"\']+)[\"\']/i', $attrs, $srcMatch)) {
+                    $src = $srcMatch[1];
+                    $alt = '';
+                    if (preg_match('/\balt\s*=\s*[\"\']([^\"\']*)[\"\']/i', $attrs, $altMatch)) {
+                        $alt = h($altMatch[1]);
+                    }
+                    return '<img src="' . $src . '" alt="' . $alt . '">';
+                }
+                return '';
+            }, $clean) ?? $clean;
+
+            return trim($clean);
+        }
+
+        /**
+         * Renders question text safely as rich HTML if it contains CKEditor markup,
+         * or falls back to escaped newline-to-br rendering for plain-text Excel questions.
+         */
+        function renderQuestionHtml(string $text): string
+        {
+            $text = trim($text);
+            if ($text === '') {
+                return '';
+            }
+
+            if ($text !== strip_tags($text)) {
+                return '<div class="question-html-content">' . sanitizeQuestionHtml($text) . '</div>';
+            }
+
+            return nl2br(h($text));
+        }
+
+        /**
+         * Prepares question content for initializing inside CKEditor.
+         */
+        function formatQuestionForEditor(string $text): string
+        {
+            $text = trim($text);
+            if ($text === '') {
+                return '';
+            }
+
+            if ($text !== strip_tags($text)) {
+                return sanitizeQuestionHtml($text);
+            }
+
+            $lines = preg_split('/\R/u', $text) ?: [$text];
+            $paras = array_map(fn($line) => '<p>' . h($line) . '</p>', $lines);
+            return implode('', $paras);
+        }
 
         /**
          * Creates a new Question Bank Spreadsheet initialized with the exact header
@@ -468,7 +541,7 @@
 
             foreach ($data as $rowNumber => $row) {
                 $qText = trim((string) ($row[$colMap['Question'] ?? 'F'] ?? ''));
-                if ($qText === '') {
+                if (trim(strip_tags($qText)) === '') {
                     continue;
                 }
 
@@ -529,7 +602,8 @@
 
             if ($search !== '') {
                 $searchLower     = strtolower($search);
-                $contentToSearch = strtolower($q['QNo'] . ' ' . $q['Question'] . ' ' . $q['Chapter'] . ' ' . $q['Category'] . ' ' . $q['OptionA'] . ' ' . $q['OptionB'] . ' ' . $q['OptionC'] . ' ' . $q['OptionD']);
+                $plainQuestion   = html_entity_decode(strip_tags((string) $q['Question']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $contentToSearch = strtolower($q['QNo'] . ' ' . $plainQuestion . ' ' . $q['Chapter'] . ' ' . $q['Category'] . ' ' . $q['OptionA'] . ' ' . $q['OptionB'] . ' ' . $q['OptionC'] . ' ' . $q['OptionD']);
 
                 if (strpos($contentToSearch, $searchLower) === false) {
                     return false;
@@ -545,36 +619,109 @@
             return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $text) ?? '';
         }
 
+        /**
+         * Appends inline-formatted HTML or plain text to a PhpWord TextRun.
+         */
+        function addFormattedLineToWordRun($qRun, string $htmlLine): void
+        {
+            $tokens = preg_split('/(<\/?(?:b|strong|i|em|u|s|sub|sup)\b[^>]*>)/i', $htmlLine, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+            if (! $tokens) {
+                return;
+            }
+
+            $bold      = false;
+            $italic    = false;
+            $underline = false;
+            $strike    = false;
+            $sub       = false;
+            $sup       = false;
+
+            foreach ($tokens as $tok) {
+                if (preg_match('/^<(\/?)(b|strong|i|em|u|s|sub|sup)\b[^>]*>$/i', $tok, $m)) {
+                    $isClosing = ($m[1] === '/');
+                    $tag       = strtolower($m[2]);
+                    if ($tag === 'b' || $tag === 'strong') {
+                        $bold = ! $isClosing;
+                    } elseif ($tag === 'i' || $tag === 'em') {
+                        $italic = ! $isClosing;
+                    } elseif ($tag === 'u') {
+                        $underline = ! $isClosing;
+                    } elseif ($tag === 's') {
+                        $strike = ! $isClosing;
+                    } elseif ($tag === 'sub') {
+                        $sub = ! $isClosing;
+                        if ($sub) {
+                    $sup = false;
+                        }
+                    } elseif ($tag === 'sup') {
+                        $sup = ! $isClosing;
+                        if ($sup) {
+                    $sub = false;
+                        }
+                    }
+                } else {
+                    $plain = html_entity_decode(strip_tags($tok), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $plain = cleanWordText($plain);
+                    if ($plain === '') {
+                        continue;
+                    }
+
+                    $style = ['size' => 10];
+                    if ($bold) {
+                        $style['bold'] = true;
+                    }
+                    if ($italic) {
+                        $style['italic'] = true;
+                    }
+                    if ($underline) {
+                        $style['underline'] = 'single';
+                    }
+                    if ($strike) {
+                        $style['strikethrough'] = true;
+                    }
+                    if ($sub) {
+                        $style['subScript'] = true;
+                    } elseif ($sup) {
+                        $style['superScript'] = true;
+                    }
+
+                    $qRun->addText($plain, $style);
+                }
+            }
+        }
+
         function addQuestionToWord(PhpWord $word, array $q, int $number): void
         {
-            $section = $word->getSections()[0];
+            $section     = $word->getSections()[0];
+            $rawQuestion = trim((string) ($q['Question'] ?? ''));
 
-            $question = trim(cleanWordText((string) ($q['Question'] ?? '')));
+            // Let PhpWord's HTML renderer consume CKEditor HTML instead of flattening
+            // it to plain text. This preserves bold/italic/underline, sub/superscript,
+            // lists, block paragraphs, tables and embedded equation images.
+            if ($rawQuestion !== '' && $rawQuestion !== strip_tags($rawQuestion)) {
+                $safeHtml     = sanitizeQuestionHtml($rawQuestion);
+                $safeHtml     = preg_replace('/^\s*<p>(.*?)<\/p>\s*$/is', '$1', $safeHtml) ?? $safeHtml;
+                $questionHtml = '<p style="margin-left:36pt; margin-bottom:0pt; line-height:100%;"><strong>'
+                . h($number . '.') . '</strong>&nbsp;' . $safeHtml . '</p>';
 
-            // Approximately six character-spaces of hanging indentation.
-            // Word uses twips for paragraph indentation; 720 twips = 0.5 inch.
-            $hangingIndent = 720;
-
-            // Question number + question text only.
-            // Per-question marks are intentionally NOT printed in the DOCX.
-            $qRun = $section->addTextRun([
-                'spaceBefore' => 0,
-                'spaceAfter'  => 0,
-                'lineHeight'  => 1.0,
-                'indentation' => [
-                    'left'    => $hangingIndent,
-                    'hanging' => $hangingIndent,
-                ],
-            ]);
-
-            $qRun->addText($number . '. ', ['bold' => true, 'size' => 10]);
-
-            $lines = preg_split('/\R/u', $question) ?: [''];
-            foreach ($lines as $i => $line) {
-                if ($i > 0) {
-                    $qRun->addTextBreak(1);
+                try {
+                    WordHtml::addHtml($section, $questionHtml, false, false);
+                } catch (Throwable $e) {
+                    // Fallback for unusual HTML that PhpWord cannot parse.
+                    $plain = html_entity_decode(strip_tags($safeHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $section->addText(
+                        $number . '. ' . cleanWordText($plain),
+                        ['size' => 10],
+                        ['spaceBefore' => 0, 'spaceAfter' => 0, 'lineHeight' => 1.0]
+                    );
                 }
-                $qRun->addText(trim($line), ['size' => 10]);
+            } else {
+                $section->addText(
+                    $number . '. ' . cleanWordText($rawQuestion),
+                    ['size' => 10],
+                    ['spaceBefore' => 0, 'spaceAfter' => 0, 'lineHeight' => 1.0,
+                        'indentation'  => ['left' => 720, 'hanging' => 720]]
+                );
             }
 
             $options = [
@@ -760,6 +907,7 @@
         $message                    = '';
         $messageType                = '';
         $justAddedId                = null;
+        $focusBasketId              = null;
         $editingBasketId            = null;
         $editId                     = null;
         $editBankId                 = null;
@@ -1281,7 +1429,7 @@
                     $resetFiltersOnBankSwitch   = true;
                     $scrollToBasket             = false;
                     $scrollToAvailableQuestions = ($selectedBank !== '');
-                    $message                   .= ' | Basket cleared and loaded Question Bank: ' . ($selectedBank ?: 'None');
+                    $message                    .= ' | Basket cleared and loaded Question Bank: ' . ($selectedBank ?: 'None');
                         }
                     } elseif ($afterSaveAction === 'load_paper' && $afterSaveTarget !== '') {
                         $chainedSaveMessage        = $message;
@@ -1567,15 +1715,21 @@
                 $scrollToBasket  = false;
             }
 
+            if (isset($_POST['cancel_edit'])) {
+                $focusBasketId  = (string) ($_POST['cancel_edit'] ?? '');
+                $scrollToBasket = true;
+            }
+
             if (isset($_POST['save_edit'])) {
                 $idToSave = (string) $_POST['save_edit'];
                 if (isset($_SESSION['basket'][$idToSave])) {
-                    $_SESSION['basket'][$idToSave]['Question'] = trim($_POST['edited_question'] ?? '');
-                    $_SESSION['basket'][$idToSave]['OptionA']  = trim($_POST['edited_option_a'] ?? '');
-                    $_SESSION['basket'][$idToSave]['OptionB']  = trim($_POST['edited_option_b'] ?? '');
-                    $_SESSION['basket'][$idToSave]['OptionC']  = trim($_POST['edited_option_c'] ?? '');
-                    $_SESSION['basket'][$idToSave]['OptionD']  = trim($_POST['edited_option_d'] ?? '');
+                    $_SESSION['basket'][$idToSave]['Question'] = sanitizeQuestionHtml((string) ($_POST['edited_question'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionA']  = trim($_POST['edited_option_a'] ?? ($_POST['edited_bank_option_a'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionB']  = trim($_POST['edited_option_b'] ?? ($_POST['edited_bank_option_b'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionC']  = trim($_POST['edited_option_c'] ?? ($_POST['edited_bank_option_c'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionD']  = trim($_POST['edited_option_d'] ?? ($_POST['edited_bank_option_d'] ?? ''));
                     $justAddedId                               = $idToSave;
+                    $focusBasketId                             = $idToSave;
                 }
                 $scrollToBasket = true;
             }
@@ -1593,10 +1747,18 @@
                 $scrollToBasket   = false;
             }
 
+            if (isset($_POST['cancel_bank_edit'])) {
+                $cancelBankId = (string) $_POST['cancel_bank_edit'];
+                if (isset($questions[(int) $cancelBankId])) {
+                    $justEditedBankId = $cancelBankId;
+                }
+                $editBankId = null;
+            }
+
             if (isset($_POST['save_bank_edit'])) {
                 $idToSave = (int) $_POST['save_bank_edit'];
                 if (isset($questions[$idToSave])) {
-                    $newText = trim($_POST['edited_bank_question'] ?? '');
+                    $newText = sanitizeQuestionHtml((string) ($_POST['edited_bank_question'] ?? ''));
                     $newOptA = trim($_POST['edited_bank_option_a'] ?? '');
                     $newOptB = trim($_POST['edited_bank_option_b'] ?? '');
                     $newOptC = trim($_POST['edited_bank_option_c'] ?? '');
@@ -1753,7 +1915,7 @@
                     $newCategory   = trim((string) ($_POST['new_category'] ?? ''));
                     $newMarks      = trim((string) ($_POST['new_marks'] ?? ''));
                     $newDifficulty = trim((string) ($_POST['new_difficulty'] ?? ''));
-                    $newQuestion   = trim((string) ($_POST['new_question'] ?? ''));
+                    $newQuestion   = sanitizeQuestionHtml((string) ($_POST['new_question'] ?? ''));
                     $newOptA       = trim((string) ($_POST['new_opt_a'] ?? ''));
                     $newOptB       = trim((string) ($_POST['new_opt_b'] ?? ''));
                     $newOptC       = trim((string) ($_POST['new_opt_c'] ?? ''));
@@ -2092,6 +2254,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Question Paper Generator</title>
+<!-- CKEditor 5 Classic Build -->
+<script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
 <style>
 body { font-family: Cambria, "Cambria Math", serif; font-size: 15px; margin: 15px; background: #f6f7f9; color: #222; }
 h1 { font-size: 22px; color: #333; margin-top: 0; margin-bottom: 15px; }
@@ -2110,6 +2274,48 @@ h3 { font-size: 16px; color: #333; margin-top: 0; margin-bottom: 10px; }
 .theme-filter   { background: #eadcf5; border-color: #caa9e5; border-left: 5px solid #7b1fa2; }
 .theme-basket   { background: #e0f0d9; border-color: #afd08f; border-left: 5px solid #27632a; }
 .theme-preview  { background: #e0e6fb; border-color: #aab8ed; border-left: 5px solid #303f9f; }
+
+/* --- CKEDITOR & RICH TEXT QUESTION STYLING --- */
+.ck-editor__editable_inline {
+    min-height: 120px;
+    font-family: Cambria, "Cambria Math", serif;
+    font-size: 15px;
+    background: #fff !important;
+    color: #222;
+}
+.ck-custom-math-tools { display:flex; flex-wrap:wrap; gap:5px; margin:4px 0 8px; }
+.ck-custom-math-tools button { background:#eef3f8; border:1px solid #b8c7d6; color:#1f3347; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:bold; cursor:pointer; }
+.ck-custom-math-tools button:hover { background:#dce8f3; }
+.ck-editor__editable_inline img.math-equation { max-height: 48px; vertical-align: middle; }
+
+.ck.ck-editor {
+    margin-bottom: 10px;
+    max-width: 100%;
+}
+.question-html-content {
+    display: block;
+}
+.question-html-content p {
+    margin: 0 0 6px 0;
+}
+.question-html-content p:last-child {
+    margin-bottom: 0;
+}
+.question-html-content ul,
+.question-html-content ol {
+    margin: 4px 0 6px 20px;
+    padding: 0;
+}
+.question-html-content table {
+    border-collapse: collapse;
+    margin: 6px 0;
+    width: auto;
+}
+.question-html-content th,
+.question-html-content td {
+    border: 1px solid #bbb;
+    padding: 4px 8px;
+}
 
 table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 8px; font-size: 15px; }
 th, td { border: 1px solid #d5d5d5; padding: 6px; vertical-align: top; } th { background: #eef1f5; }
@@ -2710,10 +2916,10 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                 <div><label class="large" style="font-weight: bold; color: red">Marks *</label><input type="number" name="new_marks" required style="width:100%;"></div>
             </div>
 
-            <label class="large" style="font-weight: bold; color: red">Question Text *</label>
-            <textarea name="new_question" rows="4" required style="width:100%; padding:5px; margin-bottom:10px;"></textarea>
+            <label class="large" style="font-weight: bold; color: red; display:block; margin-bottom:4px;">Question Text *</label>
+            <textarea name="new_question" id="new_question_editor" class="ck-question-editor" rows="4" style="width:100%; padding:5px; margin-bottom:10px;"></textarea>
 
-            <div class="grid" style="margin-bottom: 10px;">
+            <div class="grid" style="margin-bottom: 10px; margin-top: 10px;">
                 <div><label class="small" style="font-weight: bold;">Option A (Optional)</label><input type="text" name="new_opt_a" style="width:100%;"></div>
                 <div><label class="small" style="font-weight: bold;">Option B (Optional)</label><input type="text" name="new_opt_b" style="width:100%;"></div>
                 <div><label class="small" style="font-weight: bold;">Option C (Optional)</label><input type="text" name="new_opt_c" style="width:100%;"></div>
@@ -2811,7 +3017,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     <tr id="bank-row-<?php echo $id ?>">
     <td>
         <?php if ((string) $editBankId === (string) $id): ?>
-            <form method="post" style="margin:0;" id="edit-bank-form-<?php echo $id ?>">
+            <form method="post" style="margin:0;" id="edit-bank-form-<?php echo $id ?>" onsubmit="return handleBankEditSubmit(event, this);">
                 <input type="hidden" name="csrf" value="<?php echo h($csrf) ?>">
 
                 <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
@@ -2820,9 +3026,9 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                     <div style="flex: 1; min-width: 80px;"><small>Difficulty</small><input type="text" name="edited_bank_difficulty" value="<?php echo h($q['Difficulty']) ?>" style="width:100%;"></div>
                 </div>
 
-                <textarea name="edited_bank_question" rows="4" style="width:100%; padding:5px; margin-bottom:5px;"><?php echo h($q['Question']) ?></textarea>
+                <textarea name="edited_bank_question" id="edited_bank_question_<?php echo $id ?>" class="ck-question-editor" rows="4" style="width:100%; padding:5px; margin-bottom:5px;"><?php echo h(formatQuestionForEditor($q['Question'])) ?></textarea>
                 <?php if ($q['OptionA'] !== '' || $q['OptionB'] !== '' || $q['OptionC'] !== '' || $q['OptionD'] !== '' || stripos($q['Category'], 'mcq') !== false): ?>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 5px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 5px; margin-top: 8px;">
                         <div><small>Option A</small><input type="text" name="edited_bank_option_a" value="<?php echo h($q['OptionA']) ?>" style="width:100%;"></div>
                         <div><small>Option B</small><input type="text" name="edited_bank_option_b" value="<?php echo h($q['OptionB']) ?>" style="width:100%;"></div>
                         <div><small>Option C</small><input type="text" name="edited_bank_option_c" value="<?php echo h($q['OptionC']) ?>" style="width:100%;"></div>
@@ -2830,8 +3036,21 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                     </div>
                 <?php endif; ?>
                 <div style="margin-top: 8px;">
-                    <button class="success" name="save_bank_edit" value="<?php echo h($id) ?>">Save</button>
-                    <button class="secondary" name="cancel_bank_edit" value="1" formnovalidate>Cancel</button>
+                    <button type="submit"
+                        class="success"
+                        name="save_bank_edit"
+                        value="<?php echo h($id) ?>"
+                        onclick="sessionStorage.setItem('availableQuestionFocusId', '<?php echo h($id) ?>');">
+                    Save
+                </button>
+                    <button type="submit"
+                        class="secondary"
+                        name="cancel_bank_edit"
+                        value="<?php echo h($id) ?>"
+                        formnovalidate
+                        onclick="this.form.dataset.cancelling='1'; sessionStorage.setItem('availableQuestionFocusId', '<?php echo h($id) ?>');">
+                    Cancel
+                </button>
                 </div>
             </form>
         <?php else: ?>
@@ -2846,7 +3065,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
             </div>
 
             <div>
-                <?php echo nl2br(h($q['Question'])) ?>
+                <?php echo renderQuestionHtml($q['Question']) ?>
                 <?php foreach (['A' => 'OptionA', 'B' => 'OptionB', 'C' => 'OptionC', 'D' => 'OptionD'] as $label => $key): ?>
                 <?php if ($q[$key] !== ''): ?><br>&nbsp;&nbsp;<b>(<?php echo $label ?>)</b> <?php echo h($q[$key]) ?><?php endif; ?>
                 <?php endforeach; ?>
@@ -2871,7 +3090,15 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
             <?php if ((string) $editBankId !== (string) $id): ?>
                 <form method="post" style="margin:0; width:100%;">
                     <input type="hidden" name="csrf" value="<?php echo h($csrf) ?>">
-                    <button class="edit" name="edit_bank_id" value="<?php echo $id ?>" style="width:100%; padding: 4px 0; font-size: 12px;">Edit</button>
+                    <button type="submit"
+                            class="edit"
+                            name="edit_bank_id"
+                            value="<?php echo h($id) ?>"
+                            data-bank-row-id="<?php echo h($id) ?>"
+                            style="width:100%; padding: 4px 0; font-size: 12px;"
+                            onclick="sessionStorage.setItem('availableQuestionFocusId', this.dataset.bankRowId);">
+                        Edit
+                    </button>
                 </form>
             <?php endif; ?>
         </div>
@@ -3104,18 +3331,23 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                 <?php if ((string) $editId === (string) $id): ?>
                     <form method="post" style="margin:0;">
                         <input type="hidden" name="csrf" value="<?php echo h($csrf) ?>">
-                        <textarea id="basket-edit-question-<?php echo h($id) ?>" name="edited_question" rows="4" autofocus style="width:100%; padding:5px; margin-bottom:5px;"><?php echo h($q['Question']) ?></textarea>
+                        <textarea id="basket-edit-question-<?php echo h($id) ?>"
+                            name="edited_question"
+                            class="ck-question-editor"
+                            rows="4"
+                            data-editor-context="selected-question"
+                            style="width:100%; padding:5px; margin-bottom:5px;"><?php echo h($q['Question']) ?></textarea>
                         <?php if ($q['OptionA'] !== '' || $q['OptionB'] !== '' || $q['OptionC'] !== '' || $q['OptionD'] !== '' || stripos($q['Category'], 'mcq') !== false): ?>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 5px;">
-                                <div><small>Option A</small><input type="text" name="edited_bank_option_a" value="<?php echo h($q['OptionA']) ?>" style="width:100%;"></div>
-                                <div><small>Option B</small><input type="text" name="edited_bank_option_b" value="<?php echo h($q['OptionB']) ?>" style="width:100%;"></div>
-                                <div><small>Option C</small><input type="text" name="edited_bank_option_c" value="<?php echo h($q['OptionC']) ?>" style="width:100%;"></div>
-                                <div><small>Option D</small><input type="text" name="edited_bank_option_d" value="<?php echo h($q['OptionD']) ?>" style="width:100%;"></div>
+                                <div><small>Option A</small><input type="text" name="edited_option_a" value="<?php echo h($q['OptionA']) ?>" style="width:100%;"></div>
+                                <div><small>Option B</small><input type="text" name="edited_option_b" value="<?php echo h($q['OptionB']) ?>" style="width:100%;"></div>
+                                <div><small>Option C</small><input type="text" name="edited_option_c" value="<?php echo h($q['OptionC']) ?>" style="width:100%;"></div>
+                                <div><small>Option D</small><input type="text" name="edited_option_d" value="<?php echo h($q['OptionD']) ?>" style="width:100%;"></div>
                             </div>
                         <?php endif; ?>
                         <div style="margin-top: 8px;">
                             <button class="success" name="save_edit" value="<?php echo h($id) ?>">Save</button>
-                            <button class="secondary" name="cancel_edit" value="1">Cancel</button>
+                            <button class="secondary" name="cancel_edit" value="<?php echo h($id) ?>">Cancel</button>
                         </div>
                     </form>
                 <?php else: ?>
@@ -3130,7 +3362,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                     </div>
 
                     <div>
-                        <?php echo nl2br(h($q['Question'])) ?>
+                        <?php echo renderQuestionHtml($q['Question']) ?>
                         <?php foreach (['A' => 'OptionA', 'B' => 'OptionB', 'C' => 'OptionC', 'D' => 'OptionD'] as $label => $key): ?>
                         <?php if ($q[$key] !== ''): ?><br>&nbsp;&nbsp;<b>(<?php echo $label ?>)</b> <?php echo h($q[$key]) ?><?php endif; ?>
                         <?php endforeach; ?>
@@ -3231,7 +3463,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                     <div class="doc-preview-q">
                         <div class="doc-preview-qno"><?php echo $previewQIndex++ ?>.</div>
                         <div class="doc-preview-text">
-                            <?php echo nl2br(h($q['Question'])) ?>
+                            <?php echo renderQuestionHtml($q['Question']) ?>
 
                             <?php if ($q['OptionA'] !== '' || $q['OptionB'] !== '' || $q['OptionC'] !== '' || $q['OptionD'] !== ''):
                                             $optA   = trim($q['OptionA']);
@@ -3313,7 +3545,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 <!-- Unsaved Basket Confirmation Modal (for Switching QB, Loading Saved QP, or Creating New QB) -->
 <div id="unsavedBasketModal" class="modal-overlay">
     <div class="modal-content" style="width: 450px;">
-        <h3 style="margin-top:0; color:#c62828;">⚠️ Unsaved Questions in Basket</h3>
+        <h3 style="margin-top:0; color:#c62828;">⚠️️ Unsaved Questions in Basket</h3>
         <p id="unsavedBasketMessage" style="font-size:14px; line-height:1.45; margin-bottom:18px;">
             You currently have <b><?php echo count($basket) ?> question(s)</b> in your basket. Continuing will clear your current basket. Would you like to save your current Question Paper first?
         </p>
@@ -3337,6 +3569,185 @@ const csrfTokenValue = <?php echo json_encode($csrf) ?>;
 const EXPANDED_SECTIONS_KEY = 'qpg_expanded_basket_sections';
 let pendingUnsavedAction = null; // 'switch_bank', 'load_paper', or 'create_new_qb'
 let pendingUnsavedTarget = null;
+
+// --- CKEDITOR 5 MANAGEMENT FOR QUESTION EDITORS ---
+window.ckEditorsMap = new Map();
+
+function ensureMathJaxLoaded() {
+    if (window.MathJax && typeof window.MathJax.tex2svg === 'function') {
+        return Promise.resolve();
+    }
+    if (window.__mathJaxLoadPromise) return window.__mathJaxLoadPromise;
+    window.__mathJaxLoadPromise = new Promise((resolve, reject) => {
+        const existing = document.querySelector('script[data-mathjax-qpg]');
+        if (existing) {
+            existing.addEventListener('load', () => resolve(), {once:true});
+            existing.addEventListener('error', reject, {once:true});
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
+        script.async = true;
+        script.setAttribute('data-mathjax-qpg', '1');
+        script.onload = () => resolve();
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+    return window.__mathJaxLoadPromise;
+}
+
+function svgToDataUri(svg) {
+    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+}
+
+function insertHtmlIntoCkEditor(editor, html) {
+    try {
+        const viewFragment = editor.data.processor.toView(html);
+        const modelFragment = editor.data.toModel(viewFragment);
+        editor.model.change(writer => {
+            editor.model.insertContent(modelFragment, editor.model.document.selection);
+            writer.setSelection(editor.model.document.selection.getLastPosition());
+        });
+        editor.editing.view.focus();
+        return true;
+    } catch (err) {
+        console.error('CKEditor HTML insertion error:', err);
+        return false;
+    }
+}
+
+function insertMathEquation(editor) {
+    const latex = prompt('Enter the mathematical equation in LaTeX. Example: \\(x^2 + y^2 = z^2\\) or \\frac{a}{b}');
+    if (latex === null || latex.trim() === '') return;
+    ensureMathJaxLoaded().then(() => {
+        const wrapper = MathJax.tex2svg(latex.trim(), {display:false});
+        const svg = wrapper.querySelector('svg');
+        if (!svg) throw new Error('MathJax did not return an SVG equation.');
+        svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const dataUri = svgToDataUri(svg.outerHTML);
+        if (editor.commands.get('insertImage')) {
+            editor.execute('insertImage', { source: dataUri, alt: 'Equation: ' + latex.trim() });
+            editor.editing.view.focus();
+        } else {
+            insertHtmlIntoCkEditor(editor, '<span>\\(' + latex.trim() + '\\)</span>');
+        }
+    }).catch(err => {
+        console.error(err);
+        alert('The equation tool could not load MathJax. Please check your internet connection.');
+    });
+}
+
+function chemicalFormulaToHtml(formula) {
+    let out = '';
+    let i = 0;
+    while (i < formula.length) {
+        const ch = formula[i];
+        if (ch === '^') {
+            let j = i + 1;
+            while (j < formula.length && /[+\-0-9]/.test(formula[j])) j++;
+            out += '<sup>' + formula.slice(i + 1, j) + '</sup>';
+            i = j;
+            continue;
+        }
+        if (ch === '_') {
+            let j = i + 1;
+            while (j < formula.length && /[0-9]+/.test(formula[j])) j++;
+            out += '<sub>' + formula.slice(i + 1, j) + '</sub>';
+            i = j;
+            continue;
+        }
+        if (/\d/.test(ch)) {
+            let j = i;
+            while (j < formula.length && /\d/.test(formula[j])) j++;
+            out += '<sub>' + formula.slice(i, j) + '</sub>';
+            i = j;
+            continue;
+        }
+        out += ch === ' ' ? '&nbsp;' : ch.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+        i++;
+    }
+    return out;
+}
+
+function insertChemicalFormula(editor) {
+    const formula = prompt('Enter the chemical formula. Example: H2SO4, Ca(OH)2, NH4+, SO4^2-');
+    if (formula === null || formula.trim() === '') return;
+    insertHtmlIntoCkEditor(editor, '<span class="chemical-formula">' + chemicalFormulaToHtml(formula.trim()) + '</span>');
+}
+
+function addMathTools(editor, textarea) {
+    const host = editor.ui.view.element;
+    if (!host || host.parentElement.querySelector('.ck-custom-math-tools')) return;
+    const tools = document.createElement('div');
+    tools.className = 'ck-custom-math-tools';
+    const makeButton = (label, title, fn) => {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.textContent = label; btn.title = title;
+        btn.addEventListener('mousedown', e => e.preventDefault());
+        btn.addEventListener('click', () => fn(editor));
+        tools.appendChild(btn);
+    };
+    makeButton('∑ Equation', 'Insert a rendered mathematical equation', insertMathEquation);
+    makeButton('H₂O Formula', 'Insert a chemical formula with subscripts', insertChemicalFormula);
+    makeButton('x²', 'Apply superscript to the current selection', ed => ed.execute('superscript'));
+    makeButton('x₂', 'Apply subscript to the current selection', ed => ed.execute('subscript'));
+    host.parentElement.insertBefore(tools, host);
+}
+
+function initCkEditors() {
+    if (typeof ClassicEditor === 'undefined') return;
+    document.querySelectorAll('textarea.ck-question-editor').forEach(textarea => {
+        if (textarea.dataset.ckInitialized === '1') return;
+        textarea.dataset.ckInitialized = '1';
+        ClassicEditor.create(textarea, {
+            toolbar: [
+                'heading', '|', 'bold', 'italic', 'underline', 'strikethrough',
+                'subscript', 'superscript', 'link',
+                'bulletedList', 'numberedList', '|', 'outdent', 'indent',
+                'insertTable', 'blockQuote', 'undo', 'redo'
+            ]
+        }).then(editor => {
+            window.ckEditorsMap.set(textarea, editor);
+            addMathTools(editor, textarea);
+            editor.model.document.on('change:data', () => { textarea.value = editor.getData(); });
+            textarea.value = editor.getData();
+        }).catch(err => {
+            console.error('CKEditor initialization error:', err);
+            textarea.dataset.ckInitialized = '0';
+        });
+    });
+}
+
+function syncAllCkEditors() {
+    window.ckEditorsMap.forEach((editor, textarea) => {
+        if (textarea && document.body.contains(textarea)) {
+            textarea.value = editor.getData();
+        }
+    });
+}
+
+function isHtmlContentEmpty(html) {
+    if (!html) return true;
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const text = (temp.textContent || temp.innerText || '').replace(/\u00A0/g, ' ').trim();
+    return text === '' && !temp.querySelector('img, table');
+}
+
+function focusCkEditorForTextarea(textarea, attempt = 0) {
+    if (!textarea) return;
+    const editor = window.ckEditorsMap.get(textarea);
+    if (editor && editor.editing && editor.editing.view) {
+        editor.editing.view.focus();
+        return;
+    }
+    if (attempt < 20) {
+        setTimeout(() => focusCkEditorForTextarea(textarea, attempt + 1), 75);
+    } else {
+        textarea.focus({ preventScroll: true });
+        try { textarea.setSelectionRange(textarea.value.length, textarea.value.length); } catch (e) {}
+    }
+}
 
 // --- SINGLE-BUTTON XLSX IMPORT ---
 function handleImportFileSelection(fileInput) {
@@ -3370,8 +3781,18 @@ function handleCreateNewBankClick(event) {
 }
 
 function handleAddQuestionSubmit(event, formEl) {
+    syncAllCkEditors();
+
     if (!formEl.checkValidity()) {
         formEl.reportValidity();
+        return false;
+    }
+
+    const qTextarea = formEl.querySelector('textarea[name="new_question"]');
+    if (qTextarea && isHtmlContentEmpty(qTextarea.value)) {
+        event.preventDefault();
+        alert('Please enter the Question Text.');
+        focusCkEditorForTextarea(qTextarea);
         return false;
     }
 
@@ -3393,7 +3814,23 @@ function handleAddQuestionSubmit(event, formEl) {
     return true;
 }
 
+function handleBankEditSubmit(event, formEl) {
+    if (formEl.dataset.cancelling === '1') {
+        return true;
+    }
+    syncAllCkEditors();
+    const qTextarea = formEl.querySelector('textarea[name="edited_bank_question"]');
+    if (qTextarea && isHtmlContentEmpty(qTextarea.value)) {
+        event.preventDefault();
+        alert('Question text cannot be empty.');
+        focusCkEditorForTextarea(qTextarea);
+        return false;
+    }
+    return true;
+}
+
 function confirmSaveNewBankAndSubmit() {
+    syncAllCkEditors();
     const input = document.getElementById('newBankFileNameInput');
     let rawName = input ? input.value.trim() : '';
 
@@ -3586,6 +4023,8 @@ function refreshBasketAndPreviewOrder() {
 
 // Keep browser URL bar in sync if a POST action (like loading a saved QP or creating a new QB) changed the active bank
 window.addEventListener('DOMContentLoaded', function() {
+    initCkEditors();
+
     if (basketCount === 0) {
         clearExpandedSectionsMemory();
     } else {
@@ -3927,6 +4366,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             document.getElementById('available-questions-stat').innerHTML = newStat.innerHTML;
                             document.getElementById('available-questions-table').innerHTML = newTable.innerHTML;
                             document.getElementById('available-questions-pagination').innerHTML = newPagination.innerHTML;
+                            initCkEditors();
                         }
 
                         if (table) table.style.opacity = '1';
@@ -3938,6 +4378,7 @@ document.addEventListener("DOMContentLoaded", function() {
     const exportBtn = document.querySelector('button[name="export"]');
     if (exportBtn) {
         exportBtn.addEventListener('click', function(e) {
+            syncAllCkEditors();
             const hasOpenEdits = document.querySelector('textarea[name="edited_question"]') ||
                                  document.querySelector('textarea[name="edited_bank_question"]');
 
@@ -3995,10 +4436,7 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 
     if (textarea) {
-        requestAnimationFrame(function() {
-            textarea.focus({ preventScroll: true });
-            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-        });
+        setTimeout(() => focusCkEditorForTextarea(textarea), 100);
     }
 });
 </script>
@@ -4030,12 +4468,21 @@ document.addEventListener("DOMContentLoaded", function() {
     if (targetRow && targetRow.style.display !== 'none') {
         targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
         targetRow.classList.add("highlight-row");
+    }
+});
+</script>
+<?php endif; ?>
 
-        const textarea = targetRow.querySelector('textarea');
-        if (textarea) {
-            textarea.focus();
-            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-        }
+<?php if ($focusBasketId !== null && ! $scrollToPreview): ?>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const targetRow = document.getElementById("basket-row-<?php echo h($focusBasketId) ?>");
+    if (!targetRow) return;
+    targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetRow.classList.add("highlight-row");
+    const editButton = targetRow.querySelector('button[name="edit_id"]');
+    if (editButton) {
+        setTimeout(() => editButton.focus({ preventScroll: true }), 250);
     }
 });
 </script>
@@ -4043,19 +4490,73 @@ document.addEventListener("DOMContentLoaded", function() {
 
 <?php if ($justEditedBankId !== null): ?>
 <script>
-document.addEventListener("DOMContentLoaded", function() {
-    const targetBankRow = document.getElementById("bank-row-<?php echo h($justEditedBankId) ?>");
-    if (targetBankRow) {
-        targetBankRow.scrollIntoView({ behavior: "smooth", block: "center" });
-        targetBankRow.classList.add("highlight-row");
+(function () {
+    const targetId = <?php echo json_encode((string) $justEditedBankId); ?>;
 
-        const textarea = targetBankRow.querySelector('textarea');
+    function focusEditedAvailableQuestion() {
+        const row = document.getElementById('bank-row-' + targetId);
+        if (!row) return false;
+
+        row.classList.add('highlight-row');
+
+        // Keep the same question in view without allowing the later focus
+        // operation to move the page somewhere else.
+        row.scrollIntoView({ behavior: 'auto', block: 'center' });
+
+        const textarea = row.querySelector('textarea.ck-question-editor');
+
+        // CKEditor 5 replaces the textarea with its editing UI. Focus the
+        // actual contenteditable element, not the hidden textarea.
         if (textarea) {
-            textarea.focus();
-            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            const editor = window.ckEditorsMap && window.ckEditorsMap.get(textarea);
+
+            if (editor && editor.editing && editor.editing.view) {
+                editor.editing.view.focus();
+
+                // Put the caret at the end of the existing question.
+                try {
+                    const model = editor.model;
+                    model.change(writer => {
+                        const root = model.document.getRoot();
+                        writer.setSelection(writer.createPositionAt(root, 'end'));
+                    });
+                } catch (e) {}
+
+                return true;
+            }
+
+            const editable = row.querySelector('.ck-editor__editable[contenteditable="true"]');
+            if (editable) {
+                editable.focus();
+                return true;
+            }
         }
+
+        return false;
     }
-});
+
+    function startFocusPolling() {
+        let attempts = 0;
+        const maxAttempts = 100;
+
+        const timer = setInterval(function () {
+            attempts++;
+
+            if (focusEditedAvailableQuestion() || attempts >= maxAttempts) {
+                clearInterval(timer);
+            }
+        }, 50);
+
+        // Also try immediately.
+        focusEditedAvailableQuestion();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startFocusPolling, { once: true });
+    } else {
+        startFocusPolling();
+    }
+})();
 </script>
 <?php endif; ?>
 
