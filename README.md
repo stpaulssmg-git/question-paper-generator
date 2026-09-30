@@ -1,4 +1,4 @@
-# Question Paper Generator (v2.5.0)
+# Question Paper Generator
 
 A lightweight, single-file PHP web application designed for schools and educators to manage Excel (`.xlsx`) question banks, assemble examination papers with real-time chapter blueprints, preview print layouts, and export formatted Microsoft Word (`.docx`) question papers and answer keys.
 
