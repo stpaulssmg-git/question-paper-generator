@@ -284,7 +284,7 @@
         }
 
         // App configuration constants
-        define('APP_VERSION', 'v2.7.0');
+        define('APP_VERSION', 'v2.7.6');
         define('SCHOOL_NAME', "St. Paul's English School");
         define('ADDRESS', "NSD Compound, Savalanga Road");
         define('CITY_NAME', "Shivamogga");
@@ -545,25 +545,33 @@
                     continue;
                 }
 
-                $answerVal = trim((string) ($row[$colMap['Answer'] ?? 'L'] ?? ''));
-                if ($answerVal === '' && isset($colMap['CorrectOption'])) {
-                    $answerVal = trim((string) ($row[$colMap['CorrectOption']] ?? ''));
+                $answerVal        = trim((string) ($row[$colMap['Answer'] ?? 'L'] ?? ''));
+                $correctOptionVal = isset($colMap['CorrectOption'])
+                    ? trim((string) ($row[$colMap['CorrectOption']] ?? ''))
+                    : '';
+                $answerTextVal = isset($colMap['AnswerText'])
+                    ? trim((string) ($row[$colMap['AnswerText']] ?? ''))
+                    : $answerVal;
+                if ($answerVal === '' && $correctOptionVal !== '') {
+                    $answerVal = $correctOptionVal;
                 }
 
                 $questions[] = [
-                    'Chapter'    => trim((string) ($row[$colMap['Chapter'] ?? 'B'] ?? '')),
-                    'QNo'        => trim((string) ($row[$colMap['QNo'] ?? 'A'] ?? '')),
-                    'Category'   => trim((string) ($row[$colMap['Category'] ?? 'C'] ?? '')),
-                    'Marks'      => trim((string) ($row[$colMap['Marks'] ?? 'D'] ?? '')),
-                    'Difficulty' => trim((string) ($row[$colMap['Difficulty'] ?? 'E'] ?? '')),
-                    'Question'   => $qText,
-                    'OptionA'    => trim((string) ($row[$colMap['OptionA'] ?? 'G'] ?? '')),
-                    'OptionB'    => trim((string) ($row[$colMap['OptionB'] ?? 'H'] ?? '')),
-                    'OptionC'    => trim((string) ($row[$colMap['OptionC'] ?? 'I'] ?? '')),
-                    'OptionD'    => trim((string) ($row[$colMap['OptionD'] ?? 'J'] ?? '')),
-                    'Answer'     => $answerVal,
-                    '_ExcelRow'  => $rowNumber,
-                    '_ColMap'    => $colMap,
+                    'Chapter'       => trim((string) ($row[$colMap['Chapter'] ?? 'B'] ?? '')),
+                    'QNo'           => trim((string) ($row[$colMap['QNo'] ?? 'A'] ?? '')),
+                    'Category'      => trim((string) ($row[$colMap['Category'] ?? 'C'] ?? '')),
+                    'Marks'         => trim((string) ($row[$colMap['Marks'] ?? 'D'] ?? '')),
+                    'Difficulty'    => trim((string) ($row[$colMap['Difficulty'] ?? 'E'] ?? '')),
+                    'Question'      => $qText,
+                    'OptionA'       => trim((string) ($row[$colMap['OptionA'] ?? 'G'] ?? '')),
+                    'OptionB'       => trim((string) ($row[$colMap['OptionB'] ?? 'H'] ?? '')),
+                    'OptionC'       => trim((string) ($row[$colMap['OptionC'] ?? 'I'] ?? '')),
+                    'OptionD'       => trim((string) ($row[$colMap['OptionD'] ?? 'J'] ?? '')),
+                    'CorrectOption' => $correctOptionVal !== '' ? $correctOptionVal : $answerVal,
+                    'AnswerText'    => $answerTextVal,
+                    'Answer'        => $answerVal,
+                    '_ExcelRow'     => $rowNumber,
+                    '_ColMap'       => $colMap,
                 ];
             }
             return $questions;
@@ -744,7 +752,7 @@
                     'cellSpacing' => 0,
                     'width'       => 100 * 50,
                     'unit'        => 'pct',
-                    'indent'      => new TblWidth($hangingIndent, 'dxa'),
+                    'indent'      => new TblWidth(720, 'dxa'),
                 ]);
 
                 $cellStyle = [
@@ -853,6 +861,24 @@
             return strtoupper($secKey);
         }
 
+        function sectionOrderRoman(int $index): string
+        {
+            $number = max(1, $index + 1);
+            $map    = [
+                1000 => 'M', 900 => 'CM', 500 => 'D', 400 => 'CD',
+                100  => 'C', 90  => 'XC', 50  => 'L', 40  => 'XL',
+                10   => 'X', 9   => 'IX', 5   => 'V', 4   => 'IV', 1 => 'I',
+            ];
+            $roman = '';
+            foreach ($map as $value => $symbol) {
+                while ($number >= $value) {
+                    $roman  .= $symbol;
+                    $number -= $value;
+                }
+            }
+            return $roman;
+        }
+
         /**
          * Build the marks summary shown beside each DOCX section heading.
          *
@@ -941,6 +967,7 @@
             $_SESSION['doc_config']        = [];
             $_SESSION['section_order']     = [];
             $_SESSION['section_heading']   = [];
+            $_SESSION['loaded_paper_path'] = '';
             $_SESSION['creating_new_bank'] = false;
         }
 
@@ -959,6 +986,19 @@
                 $message     = 'Could not load the selected question bank.';
                 $messageType = 'error';
             }
+        }
+
+        // Values used by the Create & Add New Question autocomplete controls.
+        // They are generated from the currently selected XLSX rows so suggestions
+        // always reflect the actual data in that Question Bank.
+        $newQuestionAutocompleteRows = [];
+        foreach ($questions as $aq) {
+            $newQuestionAutocompleteRows[] = [
+                'Chapter'    => trim((string) ($aq['Chapter'] ?? '')),
+                'Category'   => trim((string) ($aq['Category'] ?? '')),
+                'Marks'      => trim((string) ($aq['Marks'] ?? '')),
+                'Difficulty' => trim((string) ($aq['Difficulty'] ?? '')),
+            ];
         }
 
         if (! isset($_SESSION['basket'])) {
@@ -1098,6 +1138,9 @@
                     $_SESSION['doc_config']        = [];
                     $_SESSION['section_order']     = [];
                     $_SESSION['section_heading']   = [];
+                    // Importing/loading a new Question Bank starts a new Question Paper context.
+                    // Never carry the previously loaded QP save target into the new bank.
+                    $_SESSION['loaded_paper_path'] = '';
                     $message                       = 'Question bank imported successfully. Columns auto-detected!';
                     $messageType                   = 'success';
                     header('Location: ' . basename($_SERVER['PHP_SELF']) . '?bank=' . urlencode($safeName));
@@ -1300,162 +1343,210 @@
                     $message     = 'Select or generate questions before saving.';
                     $messageType = 'error';
                 } else {
-                    $title         = trim($_POST['paper_title'] ?? 'QUESTION PAPER');
-                    $school        = trim($_POST['school_name'] ?? strtoupper(SCHOOL_NAME));
-                    $subtitle      = trim($_POST['paper_subtitle'] ?? '');
-                    $fontName      = trim($_POST['doc_font'] ?? ($_SESSION['doc_config']['doc_font'] ?? 'Cambria'));
-                    $watermarkText = trim($_POST['watermark_text'] ?? ($_SESSION['doc_config']['watermark_text'] ?? ''));
+                    try {
+                        $title       = strtoupper(trim($_POST['paper_title'] ?? 'QUESTION PAPER'));
+                        $school      = strtoupper(trim($_POST['school_name'] ?? strtoupper(SCHOOL_NAME)));
+                        $className   = strtoupper(trim($_POST['class_name'] ?? ''));
+                        $subjectName = strtoupper(trim($_POST['subject_name'] ?? ''));
+                        $maxMarks    = trim($_POST['max_marks'] ?? '');
+                        $fontName    = trim($_POST['doc_font'] ?? ($_SESSION['doc_config']['doc_font'] ?? 'Cambria'));
 
-                    $_SESSION['doc_config']['paper_title']    = $title;
-                    $_SESSION['doc_config']['school_name']    = $school;
-                    $_SESSION['doc_config']['paper_subtitle'] = $subtitle;
-                    $_SESSION['doc_config']['doc_font']       = $fontName;
-                    $_SESSION['doc_config']['watermark_text'] = $watermarkText;
+                        $_SESSION['doc_config']['paper_title']  = $title;
+                        $_SESSION['doc_config']['school_name']  = $school;
+                        $_SESSION['doc_config']['class_name']   = $className;
+                        $_SESSION['doc_config']['subject_name'] = $subjectName;
+                        $_SESSION['doc_config']['max_marks']    = $maxMarks;
+                        $_SESSION['doc_config']['doc_font']     = $fontName;
 
-                    $totalMarks = 0;
-                    foreach ($basket as $q) {
-                        $totalMarks += (int) $q['Marks'];
-                    }
-
-                    $totalQuestions = count($basket);
-
-                    $groupedBasket = [];
-                    foreach ($basket as $id => $q) {
-                        $sec                   = getSectionKey($q);
-                        $q['_BankId']          = $id; // Preserve question's index in the Question Bank
-                        $groupedBasket[$sec][] = $q;
-                    }
-
-                    uksort($groupedBasket, function ($a, $b) {
-                        $orderA = getSectionOrder($a);
-                        $orderB = getSectionOrder($b);
-                        if ($orderA === $orderB) {
-                    return strnatcmp($a, $b);
+                        $totalMarks = 0;
+                        foreach ($basket as $q) {
+                    $totalMarks += (int) $q['Marks'];
                         }
-                        return $orderA <=> $orderB;
-                    });
 
-                    $paperData = [
-                        'metadata' => [
-                    'school_name'     => $school,
-                    'paper_title'     => $title,
-                    'paper_subtitle'  => $subtitle,
-                    'doc_font'        => $fontName,
-                    'watermark_text'  => $watermarkText,
-                    'question_bank'   => $selectedBank, // Link QP to the active Question Bank
-                    'total_marks'     => $totalMarks,
-                    'total_questions' => $totalQuestions,
-                    'generated_at'    => date('Y-m-d H:i:s'),
-                        ],
-                        'sections' => [],
-                    ];
+                        $totalQuestions = count($basket);
 
-                    foreach ($groupedBasket as $sectionKey => $groupQuestions) {
-                        $heading     = getSectionHeading($sectionKey);
-                        $sectionData = [
-                    'section_key'     => $sectionKey,
-                    'section_heading' => $heading,
-                    'questions'       => [],
+                        $groupedBasket = [];
+                        foreach ($basket as $id => $q) {
+                    $sec                   = getSectionKey($q);
+                    $q['_BankId']          = $id; // Preserve question's index in the Question Bank
+                    $groupedBasket[$sec][] = $q;
+                        }
+
+                        uksort($groupedBasket, function ($a, $b) {
+                    $orderA = getSectionOrder($a);
+                    $orderB = getSectionOrder($b);
+                    if ($orderA === $orderB) {
+                        return strnatcmp($a, $b);
+                    }
+                    return $orderA <=> $orderB;
+                        });
+
+                        $paperData = [
+                    'metadata' => [
+                        'school_name'     => $school,
+                        'paper_title'     => $title,
+                        'class_name'      => $className,
+                        'subject_name'    => $subjectName,
+                        'max_marks'       => $maxMarks,
+                        'doc_font'        => $fontName,
+                        'question_bank'   => $selectedBank, // Link QP to the active Question Bank
+                        'total_marks'     => $totalMarks,
+                        'total_questions' => $totalQuestions,
+                        'generated_at'    => date('Y-m-d H:i:s'),
+                    ],
+                    'sections' => [],
                         ];
 
-                        foreach ($groupQuestions as $q) {
-                    unset($q['_ExcelRow'], $q['_ColMap']);
-                    $sectionData['questions'][] = $q;
+                        foreach ($groupedBasket as $sectionKey => $groupQuestions) {
+                    $heading     = getSectionHeading($sectionKey);
+                    $sectionData = [
+                        'section_key'     => $sectionKey,
+                        'section_heading' => $heading,
+                        'questions'       => [],
+                    ];
+
+                    foreach ($groupQuestions as $q) {
+                        unset($q['_ExcelRow'], $q['_ColMap']);
+                        $sectionData['questions'][] = $q;
+                    }
+                    $paperData['sections'][] = $sectionData;
                         }
-                        $paperData['sections'][] = $sectionData;
+
+                        $saveFolder = $savedPapersFolder;
+                        if (! is_dir($saveFolder) && ! mkdir($saveFolder, 0755, true) && ! is_dir($saveFolder)) {
+                    throw new RuntimeException('The Question Paper save folder could not be created.');
+                        }
+
+                        if (! is_writable($saveFolder)) {
+                    throw new RuntimeException('The Question Paper save folder is not writable.');
+                        }
+
+                        // If this Question Paper was loaded from a saved file, save silently
+                        // back to that exact file. Otherwise create a new saved paper.
+                        $loadedPaperPath     = trim((string) ($_SESSION['loaded_paper_path'] ?? ''));
+                        $requestedSaveTarget = trim((string) ($_POST['save_target_path'] ?? ''));
+                        $filePath            = '';
+                        $fileName            = '';
+
+                        if ($loadedPaperPath !== '' && $requestedSaveTarget === $loadedPaperPath) {
+                    $allowedPrefix = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/';
+                    $candidatePath = __DIR__ . '/' . ltrim($loadedPaperPath, '/\\');
+                    $realRoot      = realpath($saveFolder);
+                    $realCandidate = file_exists($candidatePath) ? realpath($candidatePath) : false;
+                    if ($realRoot && $realCandidate && is_file($realCandidate)
+                        && str_starts_with($realCandidate, $realRoot . DIRECTORY_SEPARATOR)
+                        && str_starts_with($loadedPaperPath, $allowedPrefix)) {
+                        $filePath = $realCandidate;
+                        $fileName = basename($filePath);
+                    }
+                        }
+
+                        if ($filePath === '') {
+                    $customFileName = trim((string) ($_POST['custom_filename'] ?? ''));
+                    $customFileName = preg_replace('/\.json$/i', '', $customFileName);
+                    $safeCustomName = preg_replace('/[^A-Za-z0-9._ -]/', '_', $customFileName);
+                    $safeCustomName = trim((string) $safeCustomName, " ._-\t\r\n");
+
+                    // A first-time save must always have a usable filename.
+                    if ($safeCustomName === '') {
+                        $safeCustomName = 'QuestionPaper';
                     }
 
-                    $saveFolder = $savedPapersFolder;
-                    if (! is_dir($saveFolder)) {
-                        mkdir($saveFolder, 0755, true);
-                    }
+                    $fileName = $safeCustomName . '.json';
+                    $filePath = $saveFolder . DIRECTORY_SEPARATOR . $fileName;
 
-                    // Store every new QP directly in the user's folder. Do not create
-                    // a new folder for each day. A timestamp is always included in the filename.
-                    $timestamp      = date('Ymd_His');
-                    $customFileName = trim($_POST['custom_filename'] ?? '');
-
-                    if ($customFileName !== '') {
-                        $safeCustomName = preg_replace('/[^A-Za-z0-9._ -]/', '_', $customFileName);
-                        $safeCustomName = preg_replace('/\.json$/i', '', $safeCustomName);
-                        $fileName       = $safeCustomName . '_' . $timestamp . '.json';
-                    } else {
-                        $fileName = 'QuestionPaper_' . $timestamp . '.json';
-                    }
-
-                    // Avoid collisions if more than one save occurs within the same second.
-                    $filePath = $saveFolder . '/' . $fileName;
-                    $suffix   = 1;
+                    // New QPs use the requested filename without a timestamp.
+                    // If that filename already exists, create a numbered copy rather
+                    // than silently replacing another new paper.
+                    $suffix = 1;
                     while (file_exists($filePath)) {
-                        $fileName = preg_replace('/\.json$/i', '', $fileName) . '_' . $suffix . '.json';
-                        $filePath = $saveFolder . '/' . $fileName;
+                        $fileName = $safeCustomName . '_' . $suffix . '.json';
+                        $filePath = $saveFolder . DIRECTORY_SEPARATOR . $fileName;
                         $suffix++;
                     }
-
-                    file_put_contents($filePath, json_encode($paperData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-                    $message     = 'Question paper successfully saved to your private folder: ' . h($activeOwner['display_name']) . '/' . $fileName;
-                    $messageType = 'success';
-
-                    // Refresh saved papers list for UI
-                    $savedPapersList   = [];
-                    $existingFileNames = [];
-                    $files             = array_merge(
-                        glob($saveFolder . '/*.json') ?: [],
-                        glob($saveFolder . '/*/*.json') ?: []
-                    );
-                    $files = array_values(array_unique($files));
-                    if ($files) {
-                        usort($files, function ($a, $b) {return filemtime($b) <=> filemtime($a);});
-                        foreach ($files as $file) {
-                    $relativeName = (dirname($file) === $saveFolder)
-                        ? basename($file)
-                        : basename(dirname($file)) . '/' . basename($file);
-                    $relPath           = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . $relativeName;
-                    $dateLabel         = date('Y-m-d H:i', filemtime($file));
-                    $savedPapersList[] = ['path' => $relPath, 'label' => basename($file) . ' (' . $dateLabel . ')'];
-
-                    $folderName                       = basename(dirname($file));
-                    $fileNameOnly                     = basename($file, '.json');
-                    $existingFileNames[$folderName][] = strtolower($fileNameOnly);
                         }
+
+                        $jsonToSave = json_encode($paperData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+                        if ($jsonToSave === false) {
+                    throw new RuntimeException('The Question Paper data could not be encoded.');
+                        }
+
+                        $bytesWritten = file_put_contents($filePath, $jsonToSave, LOCK_EX);
+                        if ($bytesWritten === false) {
+                    throw new RuntimeException('The Question Paper file could not be written.');
+                        }
+
+                        $_SESSION['loaded_paper_path'] = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . basename($fileName);
+
+                        $message     = 'Question paper successfully saved to your private folder: ' . h($activeOwner['display_name']) . '/' . $fileName;
+                        $messageType = 'success';
+
+                        // Refresh saved papers list for UI
+                        $savedPapersList   = [];
+                        $existingFileNames = [];
+                        $files             = array_merge(
+                    glob($saveFolder . '/*.json') ?: [],
+                    glob($saveFolder . '/*/*.json') ?: []
+                        );
+                        $files = array_values(array_unique($files));
+                        if ($files) {
+                    usort($files, function ($a, $b) {return filemtime($b) <=> filemtime($a);});
+                    foreach ($files as $file) {
+                        $relativeName = (dirname($file) === $saveFolder)
+                            ? basename($file)
+                            : basename(dirname($file)) . '/' . basename($file);
+                        $relPath           = 'saved_papers/' . safeFolderKey($activeOwner['folder_key']) . '/' . $relativeName;
+                        $dateLabel         = date('Y-m-d H:i', filemtime($file));
+                        $savedPapersList[] = ['path' => $relPath, 'label' => basename($file) . ' (' . $dateLabel . ')'];
+
+                        $folderName                       = basename(dirname($file));
+                        $fileNameOnly                     = basename($file, '.json');
+                        $existingFileNames[$folderName][] = strtolower($fileNameOnly);
                     }
-                    $existingFileNamesJson = json_encode($existingFileNames);
-                    $scrollToBasket        = true;
-
-                    // Handle chained action if triggered via the Save/Discard prompt modal
-                    $afterSaveAction = trim((string) ($_POST['after_save_action'] ?? ''));
-                    $afterSaveTarget = trim((string) ($_POST['after_save_target'] ?? ''));
-
-                    if ($afterSaveAction === 'switch_bank') {
-                        if ($afterSaveTarget === '' || in_array($afterSaveTarget, $questionBanks, true)) {
-                    $_SESSION['basket']            = [];
-                    $_SESSION['doc_config']        = [];
-                    $_SESSION['section_order']     = [];
-                    $_SESSION['section_heading']   = [];
-                    $_SESSION['creating_new_bank'] = false;
-                    $_SESSION['selected_bank']     = $afterSaveTarget;
-                    $selectedBank                  = $afterSaveTarget;
-                    $questions                     = [];
-                    if ($selectedBank !== '') {
-                        try {
-                            $questions = loadQuestionBank($bankFolder . '/' . basename($selectedBank));
-                        } catch (Throwable $e) {
-                            $questions = [];
                         }
+                        $existingFileNamesJson = json_encode($existingFileNames);
+                        $scrollToBasket        = true;
+
+                        // Handle chained action if triggered via the Save/Discard prompt modal
+                        $afterSaveAction = trim((string) ($_POST['after_save_action'] ?? ''));
+                        $afterSaveTarget = trim((string) ($_POST['after_save_target'] ?? ''));
+
+                        if ($afterSaveAction === 'switch_bank') {
+                    if ($afterSaveTarget === '' || in_array($afterSaveTarget, $questionBanks, true)) {
+                        $_SESSION['basket']            = [];
+                        $_SESSION['doc_config']        = [];
+                        $_SESSION['section_order']     = [];
+                        $_SESSION['section_heading']   = [];
+                        $_SESSION['creating_new_bank'] = false;
+                        // The old QP has just been saved; the newly selected bank must
+                        // start with no loaded-paper target so the next Save asks for a new name.
+                        $_SESSION['loaded_paper_path'] = '';
+                        $_SESSION['selected_bank']     = $afterSaveTarget;
+                        $selectedBank                  = $afterSaveTarget;
+                        $questions                     = [];
+                        if ($selectedBank !== '') {
+                            try {
+                                $questions = loadQuestionBank($bankFolder . '/' . basename($selectedBank));
+                            } catch (Throwable $e) {
+                                $questions = [];
+                            }
+                        }
+                        $resetFiltersOnBankSwitch   = true;
+                        $scrollToBasket             = false;
+                        $scrollToAvailableQuestions = ($selectedBank !== '');
+                        $message                    .= ' | Basket cleared and loaded Question Bank: ' . ($selectedBank ?: 'None');
                     }
-                    $resetFiltersOnBankSwitch   = true;
-                    $scrollToBasket             = false;
-                    $scrollToAvailableQuestions = ($selectedBank !== '');
-                    $message                    .= ' | Basket cleared and loaded Question Bank: ' . ($selectedBank ?: 'None');
+                        } elseif ($afterSaveAction === 'load_paper' && $afterSaveTarget !== '') {
+                    $chainedSaveMessage        = $message;
+                    $_POST['load_paper']       = '1';
+                    $_POST['saved_paper_path'] = $afterSaveTarget;
+                        } elseif ($afterSaveAction === 'create_new_qb') {
+                    $chainedSaveMessage         = $message;
+                    $_POST['start_create_bank'] = '1';
                         }
-                    } elseif ($afterSaveAction === 'load_paper' && $afterSaveTarget !== '') {
-                        $chainedSaveMessage        = $message;
-                        $_POST['load_paper']       = '1';
-                        $_POST['saved_paper_path'] = $afterSaveTarget;
-                    } elseif ($afterSaveAction === 'create_new_qb') {
-                        $chainedSaveMessage         = $message;
-                        $_POST['start_create_bank'] = '1';
+                    } catch (Throwable $e) {
+                        $message     = 'Could not save the Question Paper: ' . $e->getMessage();
+                        $messageType = 'error';
                     }
                 }
             }
@@ -1468,6 +1559,7 @@
                 $_SESSION['doc_config']        = [];
                 $_SESSION['section_order']     = [];
                 $_SESSION['section_heading']   = [];
+                $_SESSION['loaded_paper_path'] = '';
                 $selectedBank                  = '';
                 $questions                     = [];
                 $resetFiltersOnBankSwitch      = true;
@@ -1497,6 +1589,7 @@
                 if ($realRoot && $realPath && str_starts_with($realPath, $realRoot . DIRECTORY_SEPARATOR) && str_starts_with($relativePaper, $allowedPrefix)) {
                     $json = json_decode(file_get_contents($path), true);
                     if ($json && isset($json['sections'])) {
+                        $_SESSION['loaded_paper_path'] = $relativePaper;
                         $_SESSION['basket']            = [];
                         $_SESSION['section_order']     = [];
                         $_SESSION['section_heading']   = [];
@@ -1750,13 +1843,16 @@
             if (isset($_POST['save_edit'])) {
                 $idToSave = (string) $_POST['save_edit'];
                 if (isset($_SESSION['basket'][$idToSave])) {
-                    $_SESSION['basket'][$idToSave]['Question'] = sanitizeQuestionHtml((string) ($_POST['edited_question'] ?? ''));
-                    $_SESSION['basket'][$idToSave]['OptionA']  = trim($_POST['edited_option_a'] ?? ($_POST['edited_bank_option_a'] ?? ''));
-                    $_SESSION['basket'][$idToSave]['OptionB']  = trim($_POST['edited_option_b'] ?? ($_POST['edited_bank_option_b'] ?? ''));
-                    $_SESSION['basket'][$idToSave]['OptionC']  = trim($_POST['edited_option_c'] ?? ($_POST['edited_bank_option_c'] ?? ''));
-                    $_SESSION['basket'][$idToSave]['OptionD']  = trim($_POST['edited_option_d'] ?? ($_POST['edited_bank_option_d'] ?? ''));
-                    $justAddedId                               = $idToSave;
-                    $focusBasketId                             = $idToSave;
+                    $_SESSION['basket'][$idToSave]['Question']   = sanitizeQuestionHtml((string) ($_POST['edited_question'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionA']    = trim($_POST['edited_option_a'] ?? ($_POST['edited_bank_option_a'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionB']    = trim($_POST['edited_option_b'] ?? ($_POST['edited_bank_option_b'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionC']    = trim($_POST['edited_option_c'] ?? ($_POST['edited_bank_option_c'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['OptionD']    = trim($_POST['edited_option_d'] ?? ($_POST['edited_bank_option_d'] ?? ''));
+                    $_SESSION['basket'][$idToSave]['Category']   = trim($_POST['edited_category'] ?? $_SESSION['basket'][$idToSave]['Category']);
+                    $_SESSION['basket'][$idToSave]['Marks']      = trim($_POST['edited_marks'] ?? $_SESSION['basket'][$idToSave]['Marks']);
+                    $_SESSION['basket'][$idToSave]['Difficulty'] = trim($_POST['edited_difficulty'] ?? $_SESSION['basket'][$idToSave]['Difficulty']);
+                    $justAddedId                                 = $idToSave;
+                    $focusBasketId                               = $idToSave;
                 }
                 $scrollToBasket = true;
             }
@@ -1766,6 +1862,9 @@
                 $_SESSION['doc_config']      = [];
                 $_SESSION['section_order']   = [];
                 $_SESSION['section_heading'] = [];
+                // Clearing the paper starts a genuinely new Question Paper.
+                // Do not let a previously loaded QP path suppress the filename dialog.
+                $_SESSION['loaded_paper_path'] = '';
             }
 
             if (isset($_POST['edit_bank_id'])) {
@@ -1782,6 +1881,145 @@
                 $editBankId = null;
             }
 
+            // -- Inline bulk metadata edits from Available Questions --
+            if (isset($_POST['save_bank_meta'])) {
+                $idToSave  = (int) $_POST['save_bank_meta'];
+                $metaField = trim((string) ($_POST['meta_field'] ?? ''));
+                $newValue  = trim((string) ($_POST['edited_bank_meta'] ?? ''));
+                // Available Questions inline metadata is always stored in uppercase.
+                $newValue    = strtoupper($newValue);
+                $allowedMeta = ['Category' => 'Category', 'Marks' => 'Marks', 'Difficulty' => 'Difficulty'];
+                if (! isset($questions[$idToSave]) || ! isset($allowedMeta[$metaField])) {
+                    $message     = 'Invalid metadata edit request.';
+                    $messageType = 'error';
+                } elseif ($newValue === '') {
+                    $message     = $metaField . ' cannot be empty.';
+                    $messageType = 'error';
+                } elseif ($metaField === 'Marks' && (! is_numeric($newValue) || (float) $newValue <= 0 || ! is_finite((float) $newValue))) {
+                    $message     = 'Marks must be a positive numeric value.';
+                    $messageType = 'error';
+                } else {
+                    $columnKey = $allowedMeta[$metaField];
+                    $oldValue  = trim((string) ($questions[$idToSave][$columnKey] ?? ''));
+                    $metaCol   = $questions[$idToSave]['_ColMap'][$columnKey] ?? null;
+                    $path      = $bankFolder . '/' . basename($selectedBank);
+                    try {
+                        if (! $metaCol) {
+                    throw new RuntimeException('Excel column not detected.');
+                        }
+
+                        $spreadsheet = IOFactory::load($path);
+                        $sheet       = getQuestionsSheet($spreadsheet);
+
+                        // Difficulty and Marks are question-specific: update only
+                        // the selected question's Excel row and its linked Basket copy.
+                        // Do not replace the same value on unrelated questions.
+                        if ($metaField === 'Difficulty' || $metaField === 'Marks') {
+                    $rowNum = $questions[$idToSave]['_ExcelRow'] ?? null;
+                    if (! $rowNum) {
+                        throw new RuntimeException('Question row not detected.');
+                    }
+
+                    $sheet->setCellValue($metaCol . $rowNum, $newValue);
+                    if (isset($_SESSION['basket'][$idToSave])) {
+                        $_SESSION['basket'][$idToSave][$columnKey] = $newValue;
+                    }
+                        } else {
+                    // Category retains its existing bulk-update behavior
+                    // across matching values in the XLSX column.
+                    for ($excelRow = 2, $highestRow = $sheet->getHighestRow(); $excelRow <= $highestRow; $excelRow++) {
+                        if (trim((string) $sheet->getCell($metaCol . $excelRow)->getValue()) === $oldValue) {
+                            $sheet->setCellValue($metaCol . $excelRow, $newValue);
+                        }
+                    }
+                    foreach ($_SESSION['basket'] as $basketId => $basketQuestion) {
+                        if (trim((string) ($basketQuestion[$columnKey] ?? '')) === $oldValue) {
+                            $_SESSION['basket'][$basketId][$columnKey] = $newValue;
+                        }
+                    }
+                        }
+
+                        IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
+                        $questions                   = loadQuestionBank($path);
+                        $newQuestionAutocompleteRows = [];
+                        foreach ($questions as $aq) {
+                    $newQuestionAutocompleteRows[] = ['Chapter' => trim((string) ($aq['Chapter'] ?? '')), 'Category' => trim((string) ($aq['Category'] ?? '')), 'Marks' => trim((string) ($aq['Marks'] ?? '')), 'Difficulty' => trim((string) ($aq['Difficulty'] ?? ''))];
+                        }
+
+                        $justEditedBankId = $idToSave;
+                        $message          = ($metaField === 'Difficulty' || $metaField === 'Marks')
+                    ? $metaField . ' updated for this question.'
+                    : $metaField . ' updated successfully across the question bank.';
+                        $messageType = 'success';
+                    } catch (Throwable $e) {
+                        $message     = 'Could not save the ' . strtolower($metaField) . '. Ensure the Excel file is writable.';
+                        $messageType = 'error';
+                    }
+                }
+            }
+
+            // -- Inline Chapter edit from Available Questions --
+            if (isset($_POST['save_bank_chapter'])) {
+                $idToSave = (int) $_POST['save_bank_chapter'];
+                if (isset($questions[$idToSave])) {
+                    $newChapter = trim((string) ($_POST['edited_bank_chapter'] ?? ''));
+                    // Available Questions inline Chapter edits are always stored in uppercase.
+                    $newChapter = strtoupper($newChapter);
+                    if ($newChapter === '') {
+                        $message     = 'Chapter cannot be empty.';
+                        $messageType = 'error';
+                    } else {
+                        $rowNum     = $questions[$idToSave]['_ExcelRow'];
+                        $chapterCol = $questions[$idToSave]['_ColMap']['Chapter'] ?? 'B';
+                        $oldChapter = trim((string) ($questions[$idToSave]['Chapter'] ?? ''));
+                        $path       = $bankFolder . '/' . basename($selectedBank);
+                        try {
+                    $spreadsheet = IOFactory::load($path);
+                    $sheet       = getQuestionsSheet($spreadsheet);
+
+                    // Chapter names are shared values in the Chapter column.
+                    // Renaming one chapter therefore updates every matching
+                    // cell in that column, keeping the whole bank consistent.
+                    $highestRow = $sheet->getHighestRow();
+                    for ($excelRow = 2; $excelRow <= $highestRow; $excelRow++) {
+                        $existingChapter = trim((string) $sheet->getCell($chapterCol . $excelRow)->getValue());
+                        if ($existingChapter === $oldChapter) {
+                            $sheet->setCellValue($chapterCol . $excelRow, $newChapter);
+                        }
+                    }
+
+                    $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+                    $writer->save($path);
+
+                    // Keep all references in the current question paper basket
+                    // synchronized with the renamed chapter too.
+                    foreach ($_SESSION['basket'] as $basketId => $basketQuestion) {
+                        if (trim((string) ($basketQuestion['Chapter'] ?? '')) === $oldChapter) {
+                            $_SESSION['basket'][$basketId]['Chapter'] = $newChapter;
+                        }
+                    }
+
+                    $questions                   = loadQuestionBank($path);
+                    $newQuestionAutocompleteRows = [];
+                    foreach ($questions as $aq) {
+                        $newQuestionAutocompleteRows[] = [
+                            'Chapter'    => trim((string) ($aq['Chapter'] ?? '')),
+                            'Category'   => trim((string) ($aq['Category'] ?? '')),
+                            'Marks'      => trim((string) ($aq['Marks'] ?? '')),
+                            'Difficulty' => trim((string) ($aq['Difficulty'] ?? '')),
+                        ];
+                    }
+                    $justEditedBankId = $idToSave;
+                    $message          = 'Chapter updated successfully.';
+                    $messageType      = 'success';
+                        } catch (Throwable $e) {
+                    $message     = 'Could not save the chapter. Ensure the Excel file is writable.';
+                    $messageType = 'error';
+                        }
+                    }
+                }
+            }
+
             if (isset($_POST['save_bank_edit'])) {
                 $idToSave = (int) $_POST['save_bank_edit'];
                 if (isset($questions[$idToSave])) {
@@ -1792,9 +2030,11 @@
                     $newOptD = trim($_POST['edited_bank_option_d'] ?? '');
 
                     // New editable fields
-                    $newCat   = trim($_POST['edited_bank_category'] ?? '');
-                    $newMarks = trim($_POST['edited_bank_marks'] ?? '');
-                    $newDiff  = trim($_POST['edited_bank_difficulty'] ?? '');
+                    $newCat   = strtoupper(trim($_POST['edited_bank_category'] ?? ''));
+                    $newMarks = strtoupper(trim($_POST['edited_bank_marks'] ?? ''));
+                    $newDiff  = strtoupper(trim($_POST['edited_bank_difficulty'] ?? ''));
+                    // Category, Marks and Difficulty in the Available Questions full Edit form
+                    // are always stored in uppercase in the Excel bank and linked Basket copy.
 
                     $rowNum  = $questions[$idToSave]['_ExcelRow'];
                     $qCol    = $questions[$idToSave]['_ColMap']['Question'] ?? 'F';
@@ -1869,6 +2109,20 @@
                     $_SESSION['basket'][$idToSave]['Difficulty'] = $newDiff;
                         }
 
+                        // Reload the bank from the saved XLSX so every part of the page,
+                        // including Create & Add New Questions autocomplete, uses the
+                        // freshly edited values instead of the pre-edit snapshot.
+                        $questions                   = loadQuestionBank($path);
+                        $newQuestionAutocompleteRows = [];
+                        foreach ($questions as $aq) {
+                    $newQuestionAutocompleteRows[] = [
+                        'Chapter'    => trim((string) ($aq['Chapter'] ?? '')),
+                        'Category'   => trim((string) ($aq['Category'] ?? '')),
+                        'Marks'      => trim((string) ($aq['Marks'] ?? '')),
+                        'Difficulty' => trim((string) ($aq['Difficulty'] ?? '')),
+                    ];
+                        }
+
                         $editBankId       = null;
                         $justEditedBankId = $idToSave;
                         $message          = 'Question bank updated successfully.';
@@ -1938,10 +2192,14 @@
                     }
 
                     $newQno        = trim((string) ($_POST['new_qno'] ?? ''));
-                    $newChapter    = trim((string) ($_POST['new_chapter'] ?? ''));
-                    $newCategory   = trim((string) ($_POST['new_category'] ?? ''));
+                    $newChapter    = strtoupper(trim((string) ($_POST['new_chapter'] ?? '')));
+                    $newCategory   = strtoupper(trim((string) ($_POST['new_category'] ?? '')));
                     $newMarks      = trim((string) ($_POST['new_marks'] ?? ''));
-                    $newDifficulty = trim((string) ($_POST['new_difficulty'] ?? ''));
+                    $newDifficulty = strtoupper(trim((string) ($_POST['new_difficulty'] ?? '')));
+
+                    if ($newMarks === '' || ! is_numeric($newMarks) || ! is_finite((float) $newMarks) || (float) $newMarks <= 0) {
+                        throw new InvalidArgumentException('Marks must be a positive numeric value greater than 0.');
+                    }
                     $newQuestion   = sanitizeQuestionHtml((string) ($_POST['new_question'] ?? ''));
                     $newOptA       = trim((string) ($_POST['new_opt_a'] ?? ''));
                     $newOptB       = trim((string) ($_POST['new_opt_b'] ?? ''));
@@ -2019,11 +2277,25 @@
                     $messageType            = 'success';
                     $keepCreateQuestionOpen = true;
 
-                    // Reload the questions array so the UI updates immediately
-                    $questions = loadQuestionBank($path);
+                    // Reload the questions array so the UI updates immediately.
+                    // Rebuild the autocomplete source from the freshly saved XLSX so
+                    // the newly entered Chapter, Category, Marks and Difficulty are
+                    // available immediately when the form is rendered again.
+                    $questions                   = loadQuestionBank($path);
+                    $newQuestionAutocompleteRows = [];
+                    foreach ($questions as $aq) {
+                        $newQuestionAutocompleteRows[] = [
+                    'Chapter'    => trim((string) ($aq['Chapter'] ?? '')),
+                    'Category'   => trim((string) ($aq['Category'] ?? '')),
+                    'Marks'      => trim((string) ($aq['Marks'] ?? '')),
+                    'Difficulty' => trim((string) ($aq['Difficulty'] ?? '')),
+                        ];
+                    }
 
                 } catch (Throwable $e) {
-                    $message     = 'Could not save the question to the Excel file. Ensure the question_banks folder is writable and the file is not open elsewhere.';
+                    $message = ($e instanceof InvalidArgumentException)
+                        ? $e->getMessage()
+                        : 'Could not save the question to the Excel file. Ensure the question_banks folder is writable and the file is not open elsewhere.';
                     $messageType = 'error';
                 }
             }
@@ -2037,17 +2309,17 @@
                     $message     = 'Select or generate questions before exporting.';
                     $messageType = 'error';
                 } else {
-                    $title         = trim($_POST['paper_title'] ?? 'QUESTION PAPER');
-                    $school        = trim($_POST['school_name'] ?? strtoupper(SCHOOL_NAME));
-                    $subtitle      = trim($_POST['paper_subtitle'] ?? '');
-                    $fontName      = trim($_POST['doc_font'] ?? 'Cambria');
-                    $watermarkText = trim($_POST['watermark_text'] ?? '');
+                    $title       = strtoupper(trim($_POST['paper_title'] ?? 'QUESTION PAPER'));
+                    $school      = strtoupper(trim($_POST['school_name'] ?? strtoupper(SCHOOL_NAME)));
+                    $className   = strtoupper(trim($_POST['class_name'] ?? ''));
+                    $subjectName = strtoupper(trim($_POST['subject_name'] ?? ''));
+                    $fontName    = trim($_POST['doc_font'] ?? 'Cambria');
 
-                    $_SESSION['doc_config']['paper_title']    = $title;
-                    $_SESSION['doc_config']['school_name']    = $school;
-                    $_SESSION['doc_config']['paper_subtitle'] = $subtitle;
-                    $_SESSION['doc_config']['doc_font']       = $fontName;
-                    $_SESSION['doc_config']['watermark_text'] = $watermarkText;
+                    $_SESSION['doc_config']['paper_title']  = $title;
+                    $_SESSION['doc_config']['school_name']  = $school;
+                    $_SESSION['doc_config']['class_name']   = $className;
+                    $_SESSION['doc_config']['subject_name'] = $subjectName;
+                    $_SESSION['doc_config']['doc_font']     = $fontName;
 
                     $phpWord = new PhpWord();
                     $phpWord->setDefaultFontName($fontName);
@@ -2063,15 +2335,6 @@
                         'headerHeight' => 350,
                         'footerHeight' => 350,
                     ]);
-
-                    if ($watermarkText !== '') {
-                        $header = $section->addHeader();
-                        $header->addText(
-                    cleanWordText($watermarkText),
-                    ['size' => 28, 'color' => 'E6E6E6', 'bold' => true],
-                    ['alignment' => Jc::CENTER, 'spaceAfter' => 0]
-                        );
-                    }
 
                     $footer = $section->addFooter();
                     $footer->addPreserveText(
@@ -2093,18 +2356,12 @@
                         ['alignment' => Jc::CENTER, 'spaceBefore' => 0, 'spaceAfter' => 35, 'keepNext' => true]
                     );
 
-                    if ($subtitle !== '') {
-                        $section->addText(
-                    cleanWordText($subtitle),
-                    ['italic' => true, 'size' => 10.5],
-                    ['alignment' => Jc::CENTER, 'spaceBefore' => 0, 'spaceAfter' => 55, 'keepNext' => true]
-                        );
-                    }
-
                     $totalMarks = 0;
                     foreach ($basket as $q) {
                         $totalMarks += (int) $q['Marks'];
                     }
+                    $totalQuestions = count($basket);
+                    $displayQsMarks = $totalQuestions . ' Qs / ' . $totalMarks . ' Marks';
 
                     $meta = $section->addTable([
                         'borderSize'  => 0,
@@ -2115,13 +2372,18 @@
                         'unit'        => 'pct',
                     ]);
                     $meta->addRow(null, ['cantSplit' => true]);
-                    $meta->addCell(4500, ['borderSize' => 0])->addText(
-                        'Questions: ' . count($basket),
+                    $meta->addCell(3000, ['borderSize' => 0])->addText(
+                        'Class: ' . cleanWordText($className),
                         ['bold' => true, 'size' => 10],
                         ['alignment' => Jc::START, 'spaceAfter' => 0]
                     );
-                    $meta->addCell(4500, ['borderSize' => 0])->addText(
-                        'Maximum Marks: ' . $totalMarks,
+                    $meta->addCell(3000, ['borderSize' => 0])->addText(
+                        'Subject: ' . cleanWordText($subjectName),
+                        ['bold' => true, 'size' => 10],
+                        ['alignment' => Jc::CENTER, 'spaceAfter' => 0]
+                    );
+                    $meta->addCell(3000, ['borderSize' => 0])->addText(
+                        cleanWordText($displayQsMarks),
                         ['bold' => true, 'size' => 10],
                         ['alignment' => Jc::END, 'spaceAfter' => 0]
                     );
@@ -2153,11 +2415,12 @@
 
                     foreach ($groupedBasket as $sectionKey => $groupQuestions) {
                         $currentSectionNumber++;
+                        $sectionRoman = sectionOrderRoman($currentSectionNumber - 1);
                         $heading      = getSectionHeading($sectionKey);
                         $marksSummary = getSectionMarksSummary($groupQuestions);
 
                         $section->addText(
-                    $heading . ' ' . $marksSummary,
+                    $sectionRoman . '. ' . $heading . ' ' . $marksSummary,
                     ['bold' => true, 'size' => 11],
                     [
                         'spaceBefore'       => $currentSectionNumber === 1 ? 40 : 80,
@@ -2199,16 +2462,53 @@
                         }
                     }
 
+                    // Build the DOCX in a temporary absolute path and send only the
+                    // binary document to the browser. Any PHP warnings/notices must not
+                    // be allowed to become part of the DOCX response.
                     $fileName = ($isAnswerKey ? 'AnswerKey_' : 'QuestionPaper_') . date('Ymd_His') . '.docx';
-                    $writer   = WordIOFactory::createWriter($phpWord, 'Word2007');
-                    $writer->save($fileName);
+                    $tempDocx = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $fileName;
 
-                    header('Content-Disposition: attachment; filename="' . basename($fileName) . '"');
+                    try {
+                        $writer = WordIOFactory::createWriter($phpWord, 'Word2007');
+                        $writer->save($tempDocx);
+                    } catch (Throwable $e) {
+                        $message     = 'Could not generate the Word DOCX file. Please check the selected questions for unsupported content.';
+                        $messageType = 'error';
+                        if (file_exists($tempDocx)) {
+                    @unlink($tempDocx);
+                        }
+                        goto docx_export_done;
+                    }
+
+                    if (! file_exists($tempDocx) || filesize($tempDocx) === 0) {
+                        $message     = 'The Word DOCX file could not be created.';
+                        $messageType = 'error';
+                        if (file_exists($tempDocx)) {
+                    @unlink($tempDocx);
+                        }
+                        goto docx_export_done;
+                    }
+
+                    // Remove anything buffered before the binary response.
+                    while (ob_get_level() > 0) {
+                        ob_end_clean();
+                    }
+
+                    header('Content-Description: File Transfer');
                     header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-                    header('Content-Length: ' . filesize($fileName));
-                    readfile($fileName);
-                    unlink($fileName);
+                    header('Content-Disposition: attachment; filename="' . basename($fileName) . '"');
+                    header('Content-Transfer-Encoding: binary');
+                    header('Expires: 0');
+                    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+                    header('Pragma: public');
+                    header('Content-Length: ' . filesize($tempDocx));
+                    readfile($tempDocx);
+                    @unlink($tempDocx);
                     exit;
+
+                    docx_export_done:
+                    // DOCX generation failed; continue rendering the normal page so the
+                    // error message can be displayed instead of returning a corrupt file.
                 }
             }
         }
@@ -2297,10 +2597,15 @@ h3 { font-size: 16px; color: #333; margin-top: 0; margin-bottom: 10px; }
 .theme-import   { background: #dcecff; border-color: #93bff0; border-left: 5px solid #1565c0; }
 .theme-select   { background: #d9f4eb; border-color: #83d8bf; border-left: 5px solid #087f73; }
 .theme-saved    { background: #fff0c7; border-color: #f2cc69; border-left: 5px solid #b45309; }
-.theme-create   { background: #d7f7fa; border-color: #7ddbe6; border-left: 5px solid #0e7490; }
+.theme-create   { background: #fff200; border-color: #d6c900; border-left: 5px solid #a99f00; }
 .theme-filter   { background: #eadcf5; border-color: #caa9e5; border-left: 5px solid #7b1fa2; }
 .theme-basket   { background: #e0f0d9; border-color: #afd08f; border-left: 5px solid #27632a; }
 .theme-preview  { background: #e0e6fb; border-color: #aab8ed; border-left: 5px solid #303f9f; }
+.theme-create summary { color: #4d4600 !important; }
+.theme-create input,
+.theme-create select,
+.theme-create textarea,
+.theme-create .ck-editor__editable_inline { background: #fff !important; }
 
 /* --- CKEDITOR & RICH TEXT QUESTION STYLING --- */
 .ck-editor__editable_inline {
@@ -2344,7 +2649,7 @@ table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 8p
 th, td { border: 1px solid #d5d5d5; padding: 6px; vertical-align: top; } th { background: #eef1f5; }
 select, input[type=file], input[type=text], input[type=number], textarea { font-family: Cambria, "Cambria Math", serif; padding: 5px; margin: 2px 6px 2px 0; font-size: 15px; box-sizing: border-box; background: #fff; }
 button { font-family: Cambria, "Cambria Math", serif; padding: 5px 10px; cursor: pointer; border: 0; border-radius: 4px; font-weight: bold; font-size: 14px; }
-.primary { background: #1976d2; color: #fff; } .success { background: #28a745; color: #fff; } .danger { background: #c62828; color: #fff; } .secondary { background: #666; color: #fff; } .edit { background: #ef9b22; color: #fff; }
+.primary { background: #1976d2; color: #fff; } .success { background: #28a745; color: #fff; } .danger { background: #c62828; color: #fff; } .secondary { background: #666; color: #fff; } .edit { background: #ef9b22; color: #fff; } .print-preview-btn { background: #3949ab !important; color: #fff !important; } .print-preview-btn:hover { background: #303f9f !important; } .clear-basket-btn { background: #d84315 !important; color: #fff !important; } .clear-basket-btn:hover { background: #bf360c !important; }
 .notice { padding: 10px; border-radius: 4px; margin-bottom: 15px; } .notice.success { background: #dff0d8; color: #245b25; } .notice.error { background: #f8d7da; color: #7a2020; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .stat { font-size: 15px; color: #555; margin-bottom: 8px; display: inline-block; }
@@ -2422,15 +2727,34 @@ button { font-family: Cambria, "Cambria Math", serif; padding: 5px 10px; cursor:
     flex-shrink: 0;
 }
 .sec-order-input {
-    width: 44px !important;
-    border: 0 !important;
-    padding: 2px !important;
+    display: none !important;
+}
+.sec-sort-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+.sec-sort-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0 !important;
     margin: 0 !important;
-    text-align: center;
+    border: 1px solid #8aa987 !important;
+    border-radius: 4px !important;
+    background: #f3f8f1 !important;
+    color: #245b2b !important;
+    font-size: 11px !important;
     font-weight: bold;
-    font-size: 14px !important;
-    background: transparent !important;
-    outline: none;
+    line-height: 22px;
+    cursor: pointer;
+}
+.sec-sort-btn:hover {
+    background: #dcefd9 !important;
+}
+.sec-sort-btn:disabled {
+    opacity: .35;
+    cursor: not-allowed;
 }
 .sec-heading-input {
     flex: 1 1 220px;
@@ -2518,6 +2842,13 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 .doc-preview-title { font-size: 18px; font-weight: bold; margin-top: 6px; }
 .doc-preview-subtitle { font-size: 14px; font-style: italic; margin-top: 4px; }
 .doc-preview-meta { text-align: center; font-weight: bold; font-size: 13px; margin-bottom: 20px; }
+.document-meta-fields { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.document-meta-fields label { display:block; font-weight:bold; margin-bottom:4px; }
+.document-meta-fields input { width:100%; box-sizing:border-box; }
+.document-meta-preview { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0; text-align:initial; align-items:center; width:100%; white-space:nowrap; }
+.document-meta-preview span:nth-child(1) { text-align:left; }
+.document-meta-preview span:nth-child(2) { text-align:center; }
+.document-meta-preview span:nth-child(3) { text-align:right; }
 .doc-preview-category { font-weight: bold; font-size: 14px; margin: 15px 0 8px 0; text-transform: uppercase; text-align: left; }
 
 /* Left-justified question text and options */
@@ -2575,6 +2906,17 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     vertical-align: top !important;
 }
 
+/* Alternate row shading makes individual available questions easier to scan. */
+#available-questions-table > tbody > tr:nth-child(even) > td {
+    background: #f7f9fc !important;
+}
+#available-questions-table > tbody > tr:nth-child(odd) > td {
+    background: #ffffff !important;
+}
+#available-questions-table > tbody > tr:first-child > th {
+    background: #eeeeee !important;
+}
+
 /* Keep the actual checkbox and action button at the top edge of their cell. */
 #available-questions-table td:first-child input[type="checkbox"],
 #available-questions-table td:last-child button,
@@ -2621,6 +2963,11 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     .top-row { flex-direction: column; }
     .top-row .box { flex: 1 1 100%; }
     .grid { grid-template-columns: 1fr !important; }
+    .document-meta-fields { grid-template-columns: 1fr !important; }
+    .document-meta-preview { grid-template-columns: 1fr 1fr 1fr; gap: 0; white-space: nowrap; }
+    .document-meta-preview span:nth-child(1) { text-align: left; }
+    .document-meta-preview span:nth-child(2) { text-align: center; }
+    .document-meta-preview span:nth-child(3) { text-align: right; }
     .doc-preview-page { padding: 15px; }
     .modal-content, .teacher-modal { width: 95%; padding: 15px; }
     .teacher-modal-grid { grid-template-columns: 1fr; }
@@ -2658,6 +3005,55 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     }
     .sec-meta-info {
         white-space: normal;
+    }
+
+    /* Dynamic XLSX value suggestions for the Create & Add New Question form */
+    .qb-autocomplete-wrap {
+        position: relative;
+        width: 100%;
+    }
+    .qb-autocomplete-wrap > input {
+        width: 100% !important;
+        box-sizing: border-box;
+    }
+    .qb-autocomplete-list {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(100% + 2px);
+        z-index: 10050;
+        display: none;
+        max-height: 220px;
+        overflow-y: auto;
+        background: #fff;
+        border: 1px solid #94a3b8;
+        border-radius: 4px;
+        box-shadow: 0 5px 14px rgba(0,0,0,.16);
+        box-sizing: border-box;
+    }
+    .qb-autocomplete-item {
+        padding: 8px 10px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1.25;
+        color: #1f2937;
+        border-bottom: 1px solid #eef2f7;
+        background: #fff;
+        word-break: break-word;
+    }
+    .qb-autocomplete-item:last-child {
+        border-bottom: 0;
+    }
+    .qb-autocomplete-item:hover,
+    .qb-autocomplete-item.active {
+        background: #e0f2fe;
+        color: #0c4a6e;
+    }
+    .qb-autocomplete-empty {
+        padding: 8px 10px;
+        color: #64748b;
+        font-size: 13px;
+        background: #f8fafc;
     }
 
     /* Keep Selected & Available Questions tables and edit fields inside mobile screen */
@@ -2703,6 +3099,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     const existingBanks = <?php echo $existingBanksJson ?? '[]' ?>;
     const isCreatingNewBank = <?php echo $isCreatingNewBank ? 'true' : 'false' ?>;
     const currentDate = "<?php echo date('Y-m-d') ?>";
+    const newQuestionAutocompleteRows = <?php echo json_encode($newQuestionAutocompleteRows, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) ?>;
 
     function openChangePassword() {
         const panel = document.getElementById('change-password');
@@ -2885,7 +3282,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
             <select name="saved_paper_path" id="saved-paper-select" style="width: 100%; margin-bottom: 8px;">
                 <option value="">-- Select a saved paper --</option>
                 <?php foreach ($savedPapersList as $sp): ?>
-                    <option value="<?php echo h($sp['path']) ?>"><?php echo h($sp['label']) ?></option>
+                    <option value="<?php echo h($sp['path']) ?>" <?php echo((string) ($_SESSION['loaded_paper_path'] ?? '') === (string) $sp['path']) ? 'selected' : '' ?>><?php echo h($sp['label']) ?></option>
                 <?php endforeach; ?>
             </select>
             <div style="display: flex; gap: 8px;">
@@ -2918,7 +3315,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 </div>
 
 <details id="create-question-details" class="box theme-create" style="margin-bottom: 15px; padding: 12px;" <?php echo($isCreatingNewBank || $keepCreateQuestionOpen) ? 'open' : '' ?>>
-    <summary style="cursor: pointer; font-weight: bold; color: #0e7490; font-size: 16px; outline: none;">
+    <summary style="cursor: pointer; font-weight: bold; color: #5f5700; font-size: 16px; outline: none;">
         + Create &amp; Add New Question <?php if ($isCreatingNewBank): ?><span class="badge" style="background:#0e7490; color:#fff; margin-left:8px;">New Question Bank Mode — Template Headers Ready</span><?php endif; ?>
     </summary>
     <div style="margin-top: 15px; border-top: 1px solid #a5f3fc; padding-top: 15px;">
@@ -2933,10 +3330,10 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
             <input type="hidden" name="new_bank_filename" id="hiddenNewBankFilename" value="">
             <div class="grid" style="margin-bottom: 10px;">
                 <div><label class="large" style="font-weight: bold;">Q.No (Optional)</label><input type="text" name="new_qno" id="new_qno_input" placeholder="Auto if blank" style="width:100%;"></div>
-                <div><label class="large" style="font-weight: bold;">Difficulty (Optional)</label><input placeholder="Easy/Average/Difficult" default="Average" type="text" name="new_difficulty" style="width:100%;"></div>
-                <div><label class="large" style="font-weight: bold; color: red">Chapter *</label><input type="text" name="new_chapter" id="new_chapter_input" required style="width:100%;"></div>
-                <div><label class="large" style="font-weight: bold; color: red">Category *</label><input type="text" name="new_category" placeholder="e.g. MCQ, Short" required style="width:100%;"></div>
-                <div><label class="large" style="font-weight: bold; color: red">Marks *</label><input type="number" name="new_marks" required style="width:100%;"></div>
+                <div><label class="large" style="font-weight: bold;">Difficulty (Optional)</label><input placeholder="Easy/Average/Difficult" type="text" name="new_difficulty" style="width:100%; text-transform:uppercase;" oninput="this.value = this.value.toUpperCase();"></div>
+                <div><label class="large" style="font-weight: bold; color: red">Chapter *</label><input type="text" name="new_chapter" id="new_chapter_input" required style="width:100%; text-transform:uppercase;" oninput="this.value = this.value.toUpperCase();"></div>
+                <div><label class="large" style="font-weight: bold; color: red">Category *</label><input type="text" name="new_category" placeholder="e.g. MCQ, SHORT" required style="width:100%; text-transform:uppercase;" oninput="this.value = this.value.toUpperCase();"></div>
+                <div><label class="large" style="font-weight: bold; color: red">Marks *</label><input type="number" name="new_marks" required min="0.01" step="any" inputmode="decimal" style="width:100%;" oninput="if (this.value !== '' && parseFloat(this.value) <= 0) this.setCustomValidity('Marks must be a positive value.'); else this.setCustomValidity('');"></div>
             </div>
 
             <label class="large" style="font-weight: bold; color: red; display:block; margin-bottom:4px;">Question Text *</label>
@@ -2979,7 +3376,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 
         <div style="display: flex; gap: 6px; margin-bottom: 10px; align-items: center;">
             <input type="text" name="search" id="search-input" value="<?php echo h($searchQuery) ?>" placeholder="Search Q.No, questions, categories..." style="flex:1; margin:0;" autocomplete="off">
-            <a href="?bank=<?php echo urlencode($selectedBank) ?>&keep_basket=1" style="font-size:14px; color:#c62828; text-decoration:none; font-weight:bold; margin-left:4px; white-space:nowrap;">Clear Filters</a>
+            <a href="?bank=<?php echo urlencode($selectedBank) ?>&keep_basket=1" style="display:inline-block; font-size:14px; color:#fff; background:#2e7d32; border:1px solid #1b5e20; text-decoration:none; font-weight:bold; margin-left:4px; padding:6px 12px; border-radius:4px; white-space:nowrap; cursor:pointer;">REFRESH</a>
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px;">
@@ -3063,7 +3460,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                         class="success"
                         name="save_bank_edit"
                         value="<?php echo h($id) ?>"
-                        onclick="sessionStorage.setItem('availableQuestionFocusId', '<?php echo h($id) ?>');">
+                        onclick="rememberEditScrollPosition(); sessionStorage.setItem('availableQuestionFocusId', '<?php echo h($id) ?>');">
                     Save
                 </button>
                     <button type="submit"
@@ -3071,7 +3468,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                         name="cancel_bank_edit"
                         value="<?php echo h($id) ?>"
                         formnovalidate
-                        onclick="this.form.dataset.cancelling='1'; sessionStorage.setItem('availableQuestionFocusId', '<?php echo h($id) ?>');">
+                        onclick="this.form.dataset.cancelling='1'; rememberEditScrollPosition(); sessionStorage.setItem('availableQuestionFocusId', '<?php echo h($id) ?>');">
                     Cancel
                 </button>
                 </div>
@@ -3079,12 +3476,30 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
         <?php else: ?>
             <div style="margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
                 <span class="badge" style="background:#eeeeee; color:#333; border:1px solid #ccc;">🔢 Q.<?php echo h($q['QNo']) ?></span>
-                <span class="badge" style="background:#e3f2fd; color:#0d47a1; border:1px solid #bbdefb;">📖 <?php echo h($q['Chapter']) ?></span>
-                <span class="badge" style="background:#fff3e0; color:#e65100; border:1px solid #ffe0b2;">🏷️ <?php echo h(getSectionKey($q)) ?></span>
-                <span class="badge" style="background:#e8f5e9; color:#1b5e20; border:1px solid #c8e6c9;">⭐ <?php echo h($q['Marks']) ?> Marks</span>
-                <?php if ($q['Difficulty'] !== ''): ?>
-                    <span class="badge" style="background:#f3e5f5; color:#4a148c; border:1px solid #e1bee7;">⚡ <?php echo h($q['Difficulty']) ?></span>
-                <?php endif; ?>
+                <span class="badge chapter-inline-trigger"
+                      style="background:#e3f2fd; color:#0d47a1; border:1px solid #bbdefb; cursor:pointer;"
+                      title="Click to edit chapter"
+                      onclick="toggleInlineChapterEdit('bank', '<?php echo h($id) ?>');">📖 <?php echo h($q['Chapter']) ?></span>
+                <form method="post" class="inline-chapter-form" id="inline-chapter-bank-<?php echo h($id) ?>" style="display:none; margin:0; align-items:center; gap:4px;">
+                    <input type="hidden" name="csrf" value="<?php echo h($csrf) ?>">
+                    <input type="text" name="edited_bank_chapter" value="<?php echo h($q['Chapter']) ?>" class="inline-chapter-input" data-qb-inline-key="Chapter" aria-label="Chapter" style="width:180px; padding:3px 6px;">
+                    <button type="submit" class="success" name="save_bank_chapter" value="<?php echo h($id) ?>" style="padding:3px 7px; font-size:11px;">✓</button>
+                    <button type="button" class="secondary" style="padding:3px 7px; font-size:11px;" onclick="toggleInlineChapterEdit('bank', '<?php echo h($id) ?>');">✕</button>
+                </form>
+                <?php foreach ([['Category', '🏷️', $q['Category']], ['Marks', '⭐', $q['Marks']], ['Difficulty', '⚡', $q['Difficulty']]] as $meta): ?>
+                    <span class="badge inline-meta-trigger" title="Click to edit <?php echo h($meta[0]); ?>" onclick="toggleInlineMetaEdit('bank', '<?php echo h($id) ?>', '<?php echo h($meta[0]); ?>');"><?php echo $meta[1] . ' ' . h($meta[2]) . ($meta[0] === 'Marks' ? ' Marks' : ''); ?></span>
+                    <form method="post" class="inline-meta-form" id="inline-meta-bank-<?php echo h($id) ?>-<?php echo strtolower($meta[0]); ?>" style="display:none; margin:0; align-items:center; gap:4px;">
+                        <input type="hidden" name="csrf" value="<?php echo h($csrf) ?>">
+                        <input type="hidden" name="meta_field" value="<?php echo h($meta[0]) ?>">
+                        <?php if ($meta[0] === 'Marks'): ?>
+                            <input type="number" name="edited_bank_meta" value="<?php echo h($meta[2]) ?>" class="inline-meta-input" data-qb-inline-key="Marks" aria-label="Marks" min="0.000001" step="any" inputmode="decimal" style="width:150px; padding:3px 6px;">
+                        <?php else: ?>
+                            <input type="text" name="edited_bank_meta" value="<?php echo h($meta[2]) ?>" class="inline-meta-input" data-qb-inline-key="<?php echo h($meta[0]) ?>" aria-label="<?php echo h($meta[0]) ?>" style="width:150px; padding:3px 6px;">
+                        <?php endif; ?>
+                        <button type="submit" class="success" name="save_bank_meta" value="<?php echo h($id) ?>" style="padding:3px 7px; font-size:11px;">✓</button>
+                        <button type="button" class="secondary" style="padding:3px 7px; font-size:11px;" onclick="toggleInlineMetaEdit('bank', '<?php echo h($id) ?>', '<?php echo h($meta[0]); ?>');">✕</button>
+                    </form>
+                <?php endforeach; ?>
             </div>
 
             <div>
@@ -3215,6 +3630,12 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 
             return $wA <=> $wB;
         });
+
+        $blueprintSectionRomans = [];
+        foreach ($uniqueTypes as $sectionIndex => $sectionType) {
+            $blueprintSectionRomans[$sectionType] = sectionOrderRoman($sectionIndex);
+        }
+
         ksort($blueprint);
     ?>
 
@@ -3228,7 +3649,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                     <?php foreach ($uniqueTypes as $type):
                             $tHash = md5($type);
                     ?>
-                        <th id="blueprint_th_<?php echo $tHash ?>" style="text-align:center;" title="<?php echo h(getSectionHeading($type)) ?>"><?php echo h(getSectionOrder($type)) ?></th>
+                        <th id="blueprint_th_<?php echo $tHash ?>" style="text-align:center;" title="<?php echo h(getSectionHeading($type)) ?>"><?php echo h($blueprintSectionRomans[$type] ?? '') ?></th>
                     <?php endforeach; ?>
                     <th style="text-align:center; background:#dff0d8;">Total Qs</th>
                     <th style="text-align:center; background:#dff0d8;">Weightage</th>
@@ -3280,13 +3701,21 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 
     return $wA <=> $wB;
     });
+
+    // Display the actual section order as Roman numerals: I, II, III...
+    // while preserving the existing underlying numeric sort order and saved-paper compatibility.
+    $sectionRomans     = [];
+    $sectionRomanIndex = 0;
+    foreach (array_keys($groupedBasket) as $sectionKeyForRoman) {
+    $sectionRomans[$sectionKeyForRoman] = sectionOrderRoman($sectionRomanIndex++);
+    }
 ?>
 
 <div class="bulk-action-bar">
     <div class="sec-collapse-controls">
         <button type="button" class="sec-collapse-btn" onclick="toggleAllBasketSections(true)">▾ Expand All Sections</button>
         <button type="button" class="sec-collapse-btn" onclick="toggleAllBasketSections(false)">▸ Collapse All Sections</button>
-        <span class="small" style="margin-left:4px;">(Click any section bar below to expand/collapse; edit order <b>#</b> or heading inline)</span>
+        <span class="small" style="margin-left:4px;">(Click any section bar below to expand/collapse; use ▲ / ▼ to change section order; edit heading inline)</span>
     </div>
     <button form="bulk-remove-form" name="bulk_remove" class="danger bulk-action-btn" onclick="return confirm('Remove selected questions from the basket?');">- Remove Selected</button>
 </div>
@@ -3295,7 +3724,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     <table id="selected-questions-table">
     <thead>
     <tr>
-        <th>Question Sections &amp; Details</th>
+        <th style="text-align:left; vertical-align:middle;">Question Sections &amp; Details</th>
         <th style="width: 80px; text-align: center; vertical-align: bottom;">
             <div style="margin-bottom: 4px; font-size: 13px;">Select All</div>
             <input type="checkbox" id="select-all-basket" title="Select All Questions in Basket">
@@ -3305,6 +3734,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     <?php foreach ($groupedBasket as $sectionKey => $groupQuestions):
             $hash           = md5($sectionKey);
             $currentOrder   = getSectionOrder($sectionKey);
+            $currentRoman   = $sectionRomans[$sectionKey] ?? '';
             $currentHeading = getSectionHeading($sectionKey);
             // Collapsed by default; auto-expand only if actively editing a question inside this section
             $isExpanded = ($editingBasketId !== null && array_key_exists($editingBasketId, $groupQuestions));
@@ -3315,14 +3745,17 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                 <div class="sec-header-bar">
                     <div class="sec-header-left">
                         <span class="sec-toggle-btn" id="sec-toggle-icon-<?php echo $hash ?>" title="Expand / Collapse Section"><?php echo $isExpanded ? '▾' : '▸' ?></span>
-                        <span class="sec-order-badge" onclick="event.stopPropagation();" title="Section Sort Order (Auto-saved)">
-                            #<input type="number"
-                                name="section_order[<?php echo $hash ?>]"
-                                value="<?php echo h($currentOrder) ?>"
-                                form="export-form"
-                                class="sec-order-input"
-                                data-hash="<?php echo $hash ?>"
-                                onclick="event.stopPropagation();">
+                        <span class="sec-order-badge" id="sec-letter-<?php echo $hash ?>" onclick="event.stopPropagation();" title="Section Sort Order">
+                            <?php echo h($currentRoman) ?>
+                        </span>
+                        <input type="hidden"
+                            name="section_order[<?php echo $hash ?>]"
+                            value="<?php echo (int) $currentOrder ?>"
+                            class="sec-order-input"
+                            data-hash="<?php echo $hash ?>">
+                        <span class="sec-sort-controls" onclick="event.stopPropagation();">
+                            <button type="button" class="sec-sort-btn" title="Move section up" aria-label="Move section up" onclick="moveBasketSection('<?php echo $hash ?>', -1)">▲</button>
+                            <button type="button" class="sec-sort-btn" title="Move section down" aria-label="Move section down" onclick="moveBasketSection('<?php echo $hash ?>', 1)">▼</button>
                         </span>
                         <input type="text"
                             name="section_heading[<?php echo $hash ?>]"
@@ -3354,6 +3787,11 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                 <?php if ((string) $editId === (string) $id): ?>
                     <form method="post" style="margin:0;">
                         <input type="hidden" name="csrf" value="<?php echo h($csrf) ?>">
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                            <div style="flex:1; min-width:100px;"><small>Category</small><input type="text" name="edited_category" value="<?php echo h($q['Category']) ?>" style="width:100%;"></div>
+                            <div style="flex:1; min-width:60px;"><small>Marks</small><input type="text" name="edited_marks" value="<?php echo h($q['Marks']) ?>" style="width:100%;"></div>
+                            <div style="flex:1; min-width:80px;"><small>Difficulty</small><input type="text" name="edited_difficulty" value="<?php echo h($q['Difficulty']) ?>" style="width:100%;"></div>
+                        </div>
                         <textarea id="basket-edit-question-<?php echo h($id) ?>"
                             name="edited_question"
                             class="ck-question-editor"
@@ -3369,15 +3807,15 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                             </div>
                         <?php endif; ?>
                         <div style="margin-top: 8px;">
-                            <button class="success" name="save_edit" value="<?php echo h($id) ?>">Save</button>
-                            <button class="secondary" name="cancel_edit" value="<?php echo h($id) ?>">Cancel</button>
+                            <button type="submit" class="success" name="save_edit" value="<?php echo h($id) ?>" onclick="rememberEditScrollPosition();">Save</button>
+                            <button type="submit" class="secondary" name="cancel_edit" value="<?php echo h($id) ?>" onclick="rememberEditScrollPosition();">Cancel</button>
                         </div>
                     </form>
                 <?php else: ?>
                     <div style="margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
                         <span class="badge" style="background:#eeeeee; color:#333; border:1px solid #ccc;">🔢 Q.<?php echo h($q['QNo']) ?></span>
-                        <span class="badge" style="background:#e3f2fd; color:#0d47a1; border:1px solid #bbdefb;">📖 <?php echo h($q['Chapter']) ?></span>
-                        <span class="badge" style="background:#fff3e0; color:#e65100; border:1px solid #ffe0b2;">🏷️ <?php echo h(getSectionKey($q)) ?></span>
+                                <span class="badge" style="background:#e3f2fd; color:#0d47a1; border:1px solid #bbdefb;">📖 <?php echo h($q['Chapter']) ?></span>
+                        <span class="badge" style="background:#fff3e0; color:#e65100; border:1px solid #ffe0b2;">🏷️ <?php echo h($q['Category']) ?></span>
                         <span class="badge" style="background:#e8f5e9; color:#1b5e20; border:1px solid #c8e6c9;">⭐ <?php echo h($q['Marks']) ?> Marks</span>
                         <?php if ($q['Difficulty'] !== ''): ?>
                             <span class="badge" style="background:#f3e5f5; color:#4a148c; border:1px solid #e1bee7;">⚡ <?php echo h($q['Difficulty']) ?></span>
@@ -3427,13 +3865,12 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 <?php endif; ?> <!-- CLOSE BASKET -->
 
 <?php if (! empty($basket)):
-    $docSchool   = $_SESSION['doc_config']['school_name'] ?? SCHOOL_NAME;
-    $docTitle    = $_SESSION['doc_config']['paper_title'] ?? 'QUESTION PAPER';
-    $docSubtitle = $_SESSION['doc_config']['paper_subtitle'] ?? '';
-
-    // Feature 2 & 6 Context
-    $docFont      = $_SESSION['doc_config']['doc_font'] ?? 'Cambria';
-    $docWatermark = $_SESSION['doc_config']['watermark_text'] ?? '';
+    $docSchool  = strtoupper((string) ($_SESSION['doc_config']['school_name'] ?? SCHOOL_NAME));
+    $docTitle   = strtoupper((string) ($_SESSION['doc_config']['paper_title'] ?? 'QUESTION PAPER'));
+    $docClass   = strtoupper((string) ($_SESSION['doc_config']['class_name'] ?? ''));
+    $docSubject = strtoupper((string) ($_SESSION['doc_config']['subject_name'] ?? ''));
+    // Feature 2 Context
+    $docFont = $_SESSION['doc_config']['doc_font'] ?? 'Cambria';
 ?>
 <div id="preview-section" class="box theme-preview" style="margin-top:20px;">
     <h2>6. Document Preview & Export</h2>
@@ -3441,12 +3878,13 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     <div style="margin-bottom: 20px;">
         <label style="display:block; font-weight:bold; margin-bottom: 5px;">Document Configuration:</label>
         <div class="grid">
-            <input type="text" id="input_school_name" name="school_name" value="<?php echo h($docSchool) ?>" placeholder="School name" form="export-form">
-            <input type="text" id="input_paper_title" name="paper_title" value="<?php echo h($docTitle) ?>" placeholder="Paper title" form="export-form">
-            <input type="text" id="input_paper_subtitle" name="paper_subtitle" value="<?php echo h($docSubtitle) ?>" placeholder="Class / Subject / Examination" form="export-form">
+            <input type="text" id="input_school_name" name="school_name" value="<?php echo h($docSchool) ?>" placeholder="School name" form="export-form" style="text-transform:uppercase;">
+            <input type="text" id="input_paper_title" name="paper_title" value="<?php echo h($docTitle) ?>" placeholder="Paper title" form="export-form" style="text-transform:uppercase;">
+            <div class="document-meta-fields">
+                <div><label for="input_class_name">Class:</label><input type="text" id="input_class_name" name="class_name" value="<?php echo h($docClass) ?>" placeholder="Eg: 10th Std" form="export-form" style="text-transform:uppercase;"></div>
+                <div><label for="input_subject_name">Subject:</label><input type="text" id="input_subject_name" name="subject_name" value="<?php echo h($docSubject) ?>" placeholder="Eg: English" form="export-form" style="text-transform:uppercase;"></div>
 
-            <!-- FEATURE 6: Watermark Text Input -->
-            <input type="text" id="input_watermark" name="watermark_text" value="<?php echo h($docWatermark) ?>" placeholder="Watermark (e.g. MOCK EXAM)" form="export-form">
+            </div>
 
             <!-- FEATURE 2: Font Support Dropdown -->
             <select name="doc_font" id="input_doc_font" form="export-form">
@@ -3465,21 +3903,24 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
             <div class="doc-preview-header">
                 <div class="doc-preview-school" id="preview_school_name"><?php echo strtoupper(h($docSchool)) ?></div>
                 <div class="doc-preview-title" id="preview_paper_title"><?php echo strtoupper(h($docTitle)) ?></div>
-                <div class="doc-preview-subtitle" id="preview_paper_subtitle"><?php echo h($docSubtitle) ?></div>
             </div>
 
-            <div class="doc-preview-meta" id="preview_meta_box">
-                Maximum Marks: <?php echo isset($grandTotalMarks) ? $grandTotalMarks : 0 ?> &nbsp;&nbsp;|&nbsp;&nbsp; Questions: <?php echo isset($grandTotalQs) ? $grandTotalQs : 0 ?>
+            <div class="doc-preview-meta document-meta-preview" id="preview_meta_box">
+                <span id="preview_class_name">Class: <?php echo h($docClass) ?></span>
+                <span id="preview_subject_name">Subject: <?php echo h($docSubject) ?></span>
+                <span id="preview_qs_marks"><?php echo h($grandTotalQs . " Qs / " . $grandTotalMarks . " Marks") ?></span>
             </div>
 
             <div id="doc_preview_questions_body">
             <?php
-                $previewQIndex = 1;
+                    $previewQIndex       = 1;
+                    $previewSectionIndex = 0;
                     foreach ($groupedBasket as $sectionKey => $groupQuestions):
-                        $hash = md5($sectionKey);
+                        $hash                = md5($sectionKey);
+                        $previewSectionRoman = sectionOrderRoman($previewSectionIndex++);
             ?>
-                <div class="doc-preview-category" id="preview_heading_<?php echo $hash ?>">
-                    <?php echo h(getSectionHeading($sectionKey)) ?>
+                <div class="doc-preview-category" id="preview_heading_<?php echo $hash ?>" data-section-roman="<?php echo h($previewSectionRoman) ?>">
+                    <?php echo h($previewSectionRoman . '. ' . getSectionHeading($sectionKey)) ?>
                 </div>
 
                 <?php foreach ($groupQuestions as $q): ?>
@@ -3523,13 +3964,13 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 
     <br>
     <div style="display:flex; flex-wrap:wrap; gap:10px;">
-        <button class="primary" name="export" form="export-form" style="font-size: 16px; padding: 8px 16px;">⬇ Generate Professional DOCX</button>
+        <button type="button" class="success" style="font-size: 16px; padding: 8px 16px; background-color: #28a745;" onclick="openSaveModal()">💾 Save Question Paper</button>
+        <button class="primary" name="export" form="export-form" style="font-size: 16px; padding: 8px 16px;">⬇ Generate Word DOCX</button>
         <!-- FEATURE 1: Answer Key Trigger -->
         <button class="primary" name="export_answers" form="export-form" style="font-size: 16px; padding: 8px 16px; background-color: #0056b3;">⬇ Generate Answer Key</button>
         <!-- FEATURE 4: Direct Print Trigger -->
-        <button type="button" id="print-preview-btn" class="secondary" style="font-size: 16px; padding: 8px 16px;" onclick="window.print()">🖨️ Print Preview</button>
-        <button type="button" class="success" style="font-size: 16px; padding: 8px 16px; background-color: #28a745;" onclick="openSaveModal()">💾 Save QP</button>
-        <button class="secondary" name="clear_basket" form="export-form" formnovalidate style="font-size: 16px; padding: 8px 16px;" onclick="clearExpandedSectionsMemory()">Clear Basket</button>
+        <button type="button" id="print-preview-btn" class="print-preview-btn" style="font-size: 16px; padding: 8px 16px;" onclick="window.print()">🖨️ Print Preview</button>
+        <button class="clear-basket-btn" name="clear_basket" form="export-form" formnovalidate style="font-size: 16px; padding: 8px 16px;" onclick="clearExpandedSectionsMemory()">Clear Basket</button>
     </div>
 </div>
 <?php endif; ?>
@@ -3553,7 +3994,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 <div id="saveModal" class="modal-overlay">
     <div class="modal-content">
         <h3 style="margin-top:0;">Save Question Paper</h3>
-        <p class="small" style="margin-bottom:15px;">Enter a custom filename (without extension). If left blank, an automatic timestamped name will be used.</p>
+        <p class="small" style="margin-bottom:15px;">Enter a filename for the Question Paper (without extension).</p>
         <input type="text" id="customFileNameInput" placeholder="e.g. Science_Midterm_Class10" style="width:100%; margin-bottom:15px; padding:8px; font-size:15px;">
         <div style="display:flex; justify-content:flex-end; gap:10px;">
             <button type="button" class="secondary" onclick="closeSaveModal()">Cancel</button>
@@ -3564,6 +4005,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 <input type="hidden" name="custom_filename" id="hiddenCustomFilename" form="export-form">
 <input type="hidden" name="after_save_action" id="hiddenAfterSaveAction" value="" form="export-form">
 <input type="hidden" name="after_save_target" id="hiddenAfterSaveTarget" value="" form="export-form">
+<input type="hidden" name="save_target_path" id="hiddenSaveTargetPath" value="" form="export-form">
 
 <!-- Unsaved Basket Confirmation Modal (for Switching QB, Loading Saved QP, or Creating New QB) -->
 <div id="unsavedBasketModal" class="modal-overlay">
@@ -3589,6 +4031,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 const basketCount = <?php echo count($basket) ?>;
 const activeSelectedBank = <?php echo json_encode($selectedBank) ?>;
 const csrfTokenValue = <?php echo json_encode($csrf) ?>;
+const loadedPaperPath = <?php echo json_encode((string) ($_SESSION['loaded_paper_path'] ?? '')) ?>;
 const EXPANDED_SECTIONS_KEY = 'qpg_expanded_basket_sections';
 let pendingUnsavedAction = null; // 'switch_bank', 'load_paper', or 'create_new_qb'
 let pendingUnsavedTarget = null;
@@ -3680,6 +4123,576 @@ function handleCreateNewBankClick(event) {
     clearExpandedSectionsMemory();
     return true;
 }
+
+// --- DYNAMIC XLSX VALUE AUTOCOMPLETE FOR NEW QUESTIONS ---
+(function initNewQuestionXlsxAutocomplete() {
+    // Autocomplete is intentionally limited to these four XLSX-backed fields.
+    // Free-text fields such as Q.No, Question Text, Options, Correct Option and
+    // Answer Text are left untouched.
+    const fieldConfig = [
+        { selector: 'input[name="new_difficulty"]', key: 'Difficulty' },
+        { selector: 'input[name="new_chapter"]', key: 'Chapter' },
+        { selector: 'input[name="new_category"]', key: 'Category' },
+        { selector: 'input[name="new_marks"]', key: 'Marks' }
+    ];
+
+    const rows = Array.isArray(newQuestionAutocompleteRows) ? newQuestionAutocompleteRows : [];
+
+    function normalise(value) {
+        return String(value ?? '').trim().toLocaleLowerCase();
+    }
+
+    function uniqueValues(key) {
+        const seen = new Set();
+        const values = [];
+        // Category is intentionally NOT dependent on Chapter or Marks.
+        // Always build the Category suggestions from every row in the
+        // currently loaded XLSX question bank.
+        rows.forEach(row => {
+            const value = String(row[key] ?? '').trim();
+            if (!value) return;
+            const compare = normalise(value);
+            if (!seen.has(compare)) {
+                seen.add(compare);
+                values.push(value);
+            }
+        });
+
+        return values;
+    }
+
+    function closeAll(except) {
+        document.querySelectorAll('.qb-autocomplete-list').forEach(list => {
+            if (list !== except) list.style.display = 'none';
+        });
+    }
+
+    function chooseItem(input, value) {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        const list = input.parentElement.querySelector('.qb-autocomplete-list');
+        if (list) list.style.display = 'none';
+    }
+
+    function renderSuggestions(input, key, forceOpen) {
+        const list = input.parentElement.querySelector('.qb-autocomplete-list');
+        if (!list) return;
+
+        const query = normalise(input.value);
+        const allValues = uniqueValues(key);
+        const filtered = allValues.filter(value => normalise(value).includes(query));
+
+        list.innerHTML = '';
+        if (!filtered.length) {
+            if (forceOpen && allValues.length) {
+                const empty = document.createElement('div');
+                empty.className = 'qb-autocomplete-empty';
+                empty.textContent = 'No matching XLSX value — you can enter a new value.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+            }
+            return;
+        }
+
+        filtered.slice(0, 50).forEach(value => {
+            const item = document.createElement('div');
+            item.className = 'qb-autocomplete-item';
+            item.textContent = value;
+            item.dataset.value = value;
+            item.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                chooseItem(input, value);
+            });
+            list.appendChild(item);
+        });
+
+        list.style.display = 'block';
+    }
+
+    function initField(input, key) {
+        if (!input || input.dataset.qbAutocomplete === '1') return;
+        input.dataset.qbAutocomplete = '1';
+        input.setAttribute('autocomplete', 'off');
+
+        const wrap = document.createElement('div');
+        wrap.className = 'qb-autocomplete-wrap';
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+
+        const list = document.createElement('div');
+        list.className = 'qb-autocomplete-list';
+        list.setAttribute('role', 'listbox');
+        wrap.appendChild(list);
+
+        input.addEventListener('focus', function() {
+            closeAll(list);
+            renderSuggestions(input, key, true);
+        });
+
+        input.addEventListener('input', function() {
+            closeAll(list);
+            renderSuggestions(input, key, true);
+        });
+
+        input.addEventListener('keydown', function(e) {
+            if (list.style.display === 'none') return;
+            const items = Array.from(list.querySelectorAll('.qb-autocomplete-item'));
+            if (!items.length) {
+                if (e.key === 'Escape') list.style.display = 'none';
+                return;
+            }
+
+            let activeIndex = items.findIndex(item => item.classList.contains('active'));
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = (activeIndex + 1) % items.length;
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
+            } else if (e.key === 'Enter' && activeIndex >= 0) {
+                e.preventDefault();
+                chooseItem(input, items[activeIndex].dataset.value || items[activeIndex].textContent);
+                return;
+            } else if (e.key === 'Escape') {
+                list.style.display = 'none';
+                return;
+            } else {
+                return;
+            }
+
+            items.forEach(item => item.classList.remove('active'));
+            if (activeIndex >= 0) {
+                items[activeIndex].classList.add('active');
+                items[activeIndex].scrollIntoView({ block: 'nearest' });
+            }
+        });
+
+        input.addEventListener('blur', function() {
+            setTimeout(() => { list.style.display = 'none'; }, 120);
+        });
+    }
+
+    function init() {
+        fieldConfig.forEach(config => {
+            document.querySelectorAll(config.selector).forEach(input => initField(input, config.key));
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();
+
+// --- INLINE EDITING FOR AVAILABLE QUESTIONS ---
+// These controls edit the loaded question-bank XLSX.  Keep the basket inline
+// editing flow separate; these functions target only the Available Questions table.
+(function initAvailableQuestionInlineEditing() {
+    function closeAllInlineEditors() {
+        document.querySelectorAll('#available-questions-table .inline-meta-form, #available-questions-table .inline-chapter-form').forEach(function(form) {
+            // Closing an inline editor without submitting is always a discard.
+            // Restore the value that was present when this editor was opened.
+            const input = form.querySelector('.inline-meta-input, .inline-chapter-input');
+            if (input && input.dataset.inlineOriginalValue !== undefined) {
+                input.value = input.dataset.inlineOriginalValue;
+            }
+            form.style.display = 'none';
+        });
+        document.querySelectorAll('#available-questions-table .inline-meta-trigger, #available-questions-table .chapter-inline-trigger').forEach(function(trigger) {
+            trigger.style.display = '';
+        });
+    }
+
+    function rememberInlineOriginalValue(form) {
+        if (!form) return;
+        const input = form.querySelector('.inline-meta-input, .inline-chapter-input');
+        if (input) input.dataset.inlineOriginalValue = input.value;
+    }
+
+    function focusEditor(form) {
+        if (!form) return;
+        const input = form.querySelector('input[type="text"]:not([type="hidden"])');
+        if (!input) return;
+        requestAnimationFrame(function() {
+            input.focus();
+            input.select();
+        });
+    }
+
+    window.toggleInlineChapterEdit = function(scope, id) {
+        // Only Available Questions uses the inline bank editor.
+        if (scope !== 'bank') return;
+
+        const form = document.getElementById('inline-chapter-bank-' + id);
+        const trigger = document.querySelector('#bank-row-' + id + ' .chapter-inline-trigger');
+        if (!form) return;
+
+        const opening = form.style.display === 'none' || form.style.display === '';
+        closeAllInlineEditors();
+
+        if (opening) {
+            rememberInlineOriginalValue(form);
+            form.style.display = 'inline-flex';
+            if (trigger) trigger.style.display = 'none';
+            focusEditor(form);
+        }
+    };
+
+    window.toggleInlineMetaEdit = function(scope, id, field) {
+        // Only Available Questions uses the inline bank editor.
+        if (scope !== 'bank') return;
+
+        const fieldSlug = String(field || '').toLowerCase();
+        const form = document.getElementById('inline-meta-bank-' + id + '-' + fieldSlug);
+        const row = document.getElementById('bank-row-' + id);
+        if (!form || !row) return;
+
+        const opening = form.style.display === 'none' || form.style.display === '';
+        closeAllInlineEditors();
+
+        if (opening) {
+            rememberInlineOriginalValue(form);
+            form.style.display = 'inline-flex';
+            const trigger = Array.from(row.querySelectorAll('.inline-meta-trigger')).find(function(el) {
+                const onclick = el.getAttribute('onclick') || '';
+                return onclick.indexOf("'" + field + "'") !== -1 || onclick.indexOf('"' + field + '"') !== -1;
+            });
+            if (trigger) trigger.style.display = 'none';
+            focusEditor(form);
+        }
+    };
+
+    // Clicking or moving focus outside the active editor is an implicit cancel.
+    // The value is restored by closeAllInlineEditors(); only the ✓ submit button saves.
+    document.addEventListener('pointerdown', function(e) {
+        const target = e.target;
+        const openForm = document.querySelector('#available-questions-table .inline-meta-form[style*="display: inline-flex"], #available-questions-table .inline-chapter-form[style*="display: inline-flex"]');
+        if (!openForm || openForm.contains(target)) return;
+        closeAllInlineEditors();
+    });
+
+    document.addEventListener('focusin', function(e) {
+        const target = e.target;
+        const openForm = document.querySelector('#available-questions-table .inline-meta-form[style*="display: inline-flex"], #available-questions-table .inline-chapter-form[style*="display: inline-flex"]');
+        if (!openForm || openForm.contains(target)) return;
+        closeAllInlineEditors();
+    });
+
+    // Escape closes the currently open Available Questions inline editor.
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        const input = e.target;
+        if (!input || (!input.classList.contains('inline-meta-input') && !input.classList.contains('inline-chapter-input'))) return;
+        closeAllInlineEditors();
+    });
+
+    // Remember the question being edited so the page can return to the same row
+    // after the PHP form submission/save.
+    document.addEventListener('submit', function(e) {
+        const form = e.target;
+        if (!form || !form.closest('#available-questions-table')) return;
+
+        const submitter = e.submitter;
+        if (!submitter) return;
+
+        if (submitter.name === 'save_bank_meta' || submitter.name === 'save_bank_chapter') {
+            sessionStorage.setItem('availableQuestionFocusId', submitter.value || '');
+        }
+    });
+})();
+
+// --- XLSX VALUE AUTOCOMPLETE FOR INLINE QUESTION-DETAIL FIELDS ---
+// Uses the current loaded XLSX bank for Chapter, Category, Marks and Difficulty.
+// The complete list is shown on focus/click and is narrowed as the user types.
+(function initInlineQuestionMetaAutocomplete() {
+    const rows = Array.isArray(newQuestionAutocompleteRows) ? newQuestionAutocompleteRows : [];
+
+    function normalise(value) {
+        return String(value ?? '').trim().toLocaleLowerCase();
+    }
+
+    function uniqueValues(key) {
+        const seen = new Set();
+        const values = [];
+        rows.forEach(row => {
+            const value = String(row[key] ?? '').trim();
+            if (!value) return;
+            const compare = normalise(value);
+            if (!seen.has(compare)) {
+                seen.add(compare);
+                values.push(value);
+            }
+        });
+        return values;
+    }
+
+    function closeAll(except) {
+        document.querySelectorAll('.qb-inline-autocomplete-list').forEach(list => {
+            if (list !== except) list.style.display = 'none';
+        });
+    }
+
+    function renderSuggestions(input, key, forceOpen) {
+        const list = input.parentElement.querySelector('.qb-inline-autocomplete-list');
+        if (!list) return;
+        const query = normalise(input.value);
+        const values = uniqueValues(key);
+        const filtered = values.filter(value => normalise(value).includes(query));
+        list.innerHTML = '';
+
+        if (!filtered.length) {
+            if (forceOpen && values.length) {
+                const empty = document.createElement('div');
+                empty.className = 'qb-autocomplete-empty';
+                empty.textContent = 'No matching XLSX value — you can enter a new value.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+            }
+            return;
+        }
+
+        filtered.slice(0, 50).forEach(value => {
+            const item = document.createElement('div');
+            item.className = 'qb-autocomplete-item';
+            item.textContent = value;
+            item.dataset.value = value;
+            item.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                input.value = value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                list.style.display = 'none';
+            });
+            list.appendChild(item);
+        });
+        list.style.display = 'block';
+    }
+
+    function initField(input) {
+        if (!input || input.dataset.qbInlineAutocomplete === '1') return;
+        const key = input.getAttribute('data-qb-inline-key');
+        if (!key) return;
+        input.dataset.qbInlineAutocomplete = '1';
+        input.setAttribute('autocomplete', 'off');
+
+        const parent = input.parentElement;
+        const list = document.createElement('div');
+        list.className = 'qb-inline-autocomplete-list qb-autocomplete-list';
+        list.setAttribute('role', 'listbox');
+        parent.style.position = parent.style.position || 'relative';
+        parent.appendChild(list);
+
+        input.addEventListener('focus', function() {
+            closeAll(list);
+            renderSuggestions(input, key, true);
+        });
+        input.addEventListener('input', function() {
+            closeAll(list);
+            renderSuggestions(input, key, true);
+        });
+        input.addEventListener('keydown', function(e) {
+            if (list.style.display === 'none') return;
+            const items = Array.from(list.querySelectorAll('.qb-autocomplete-item'));
+            if (!items.length) {
+                if (e.key === 'Escape') list.style.display = 'none';
+                return;
+            }
+            let activeIndex = items.findIndex(item => item.classList.contains('active'));
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = (activeIndex + 1) % items.length;
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
+            } else if (e.key === 'Enter' && activeIndex >= 0) {
+                e.preventDefault();
+                input.value = items[activeIndex].dataset.value || items[activeIndex].textContent;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                list.style.display = 'none';
+                return;
+            } else if (e.key === 'Escape') {
+                list.style.display = 'none';
+                return;
+            } else {
+                return;
+            }
+            items.forEach(item => item.classList.remove('active'));
+            if (activeIndex >= 0) {
+                items[activeIndex].classList.add('active');
+                items[activeIndex].scrollIntoView({ block: 'nearest' });
+            }
+        });
+        input.addEventListener('blur', function() {
+            setTimeout(() => { list.style.display = 'none'; }, 150);
+        });
+    }
+
+    function init() {
+        document.querySelectorAll('.inline-chapter-input[data-qb-inline-key], .inline-meta-input[data-qb-inline-key]').forEach(initField);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();
+
+// --- XLSX VALUE AUTOCOMPLETE FOR QUESTION EDIT FIELDS ---
+// Applies to edit controls in both Available Questions and Selected Questions.
+// Category always uses the complete Category list from the loaded XLSX bank;
+// it is never filtered by Chapter or Marks.
+(function initQuestionEditXlsxAutocomplete() {
+    const fieldConfig = [
+        { selector: 'input[name="edited_bank_difficulty"], input[name="edited_difficulty"]', key: 'Difficulty' },
+        { selector: 'input[name="edited_bank_category"], input[name="edited_category"]', key: 'Category' },
+        { selector: 'input[name="edited_bank_marks"], input[name="edited_marks"]', key: 'Marks' }
+    ];
+    const rows = Array.isArray(newQuestionAutocompleteRows) ? newQuestionAutocompleteRows : [];
+
+    function normalise(value) {
+        return String(value ?? '').trim().toLocaleLowerCase();
+    }
+
+    function uniqueValues(key) {
+        const seen = new Set();
+        const values = [];
+        rows.forEach(row => {
+            const value = String(row[key] ?? '').trim();
+            if (!value) return;
+            const compare = normalise(value);
+            if (!seen.has(compare)) {
+                seen.add(compare);
+                values.push(value);
+            }
+        });
+        return values;
+    }
+
+    function closeAll(except) {
+        document.querySelectorAll('.qb-autocomplete-list').forEach(list => {
+            if (list !== except) list.style.display = 'none';
+        });
+    }
+
+    function chooseItem(input, value) {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        const list = input.parentElement.querySelector('.qb-autocomplete-list');
+        if (list) list.style.display = 'none';
+    }
+
+    function renderSuggestions(input, key, forceOpen) {
+        const list = input.parentElement.querySelector('.qb-autocomplete-list');
+        if (!list) return;
+        const query = normalise(input.value);
+        const allValues = uniqueValues(key);
+        const filtered = allValues.filter(value => normalise(value).includes(query));
+        list.innerHTML = '';
+
+        if (!filtered.length) {
+            if (forceOpen && allValues.length) {
+                const empty = document.createElement('div');
+                empty.className = 'qb-autocomplete-empty';
+                empty.textContent = 'No matching XLSX value — you can enter a new value.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+            }
+            return;
+        }
+
+        filtered.slice(0, 50).forEach(value => {
+            const item = document.createElement('div');
+            item.className = 'qb-autocomplete-item';
+            item.textContent = value;
+            item.dataset.value = value;
+            item.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                chooseItem(input, value);
+            });
+            list.appendChild(item);
+        });
+        list.style.display = 'block';
+    }
+
+    function initField(input, key) {
+        if (!input || input.dataset.qbAutocomplete === '1') return;
+        input.dataset.qbAutocomplete = '1';
+        input.setAttribute('autocomplete', 'off');
+
+        const wrap = document.createElement('div');
+        wrap.className = 'qb-autocomplete-wrap';
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+
+        const list = document.createElement('div');
+        list.className = 'qb-autocomplete-list';
+        list.setAttribute('role', 'listbox');
+        wrap.appendChild(list);
+
+        input.addEventListener('focus', function() {
+            closeAll(list);
+            renderSuggestions(input, key, true);
+        });
+        input.addEventListener('input', function() {
+            closeAll(list);
+            renderSuggestions(input, key, true);
+        });
+        input.addEventListener('keydown', function(e) {
+            if (list.style.display === 'none') return;
+            const items = Array.from(list.querySelectorAll('.qb-autocomplete-item'));
+            if (!items.length) {
+                if (e.key === 'Escape') list.style.display = 'none';
+                return;
+            }
+            let activeIndex = items.findIndex(item => item.classList.contains('active'));
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = (activeIndex + 1) % items.length;
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
+            } else if (e.key === 'Enter' && activeIndex >= 0) {
+                e.preventDefault();
+                chooseItem(input, items[activeIndex].dataset.value || items[activeIndex].textContent);
+                return;
+            } else if (e.key === 'Escape') {
+                list.style.display = 'none';
+                return;
+            } else {
+                return;
+            }
+            items.forEach(item => item.classList.remove('active'));
+            if (activeIndex >= 0) {
+                items[activeIndex].classList.add('active');
+                items[activeIndex].scrollIntoView({ block: 'nearest' });
+            }
+        });
+        input.addEventListener('blur', function() {
+            setTimeout(() => { list.style.display = 'none'; }, 120);
+        });
+    }
+
+    function init() {
+        fieldConfig.forEach(config => {
+            document.querySelectorAll(config.selector).forEach(input => initField(input, config.key));
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();
 
 function handleAddQuestionSubmit(event, formEl) {
     syncAllCkEditors();
@@ -3799,6 +4812,30 @@ function clearExpandedSectionsMemory() {
     } catch (e) {}
 }
 
+// Preserve the exact viewport position when an edit form is saved/cancelled.
+// This prevents competing smooth-scroll/focus operations from making the page jump.
+function rememberEditScrollPosition() {
+    try {
+        sessionStorage.setItem('qpg_edit_restore_scroll_y', String(window.scrollY || window.pageYOffset || 0));
+        sessionStorage.setItem('qpg_edit_restore_scroll_pending', '1');
+    } catch (e) {}
+}
+
+function consumeEditScrollPosition() {
+    try {
+        if (sessionStorage.getItem('qpg_edit_restore_scroll_pending') !== '1') return null;
+        const raw = sessionStorage.getItem('qpg_edit_restore_scroll_y');
+        sessionStorage.removeItem('qpg_edit_restore_scroll_pending');
+        sessionStorage.removeItem('qpg_edit_restore_scroll_y');
+        const y = Number(raw);
+        return Number.isFinite(y) ? y : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+window.qpgEditRestoreScrollY = consumeEditScrollPosition();
+
 function setBasketSectionState(hash, expand, persist = true) {
     const rows = document.querySelectorAll('.sec-rows-' + hash);
     const icon = document.getElementById('sec-toggle-icon-' + hash);
@@ -3853,6 +4890,9 @@ function applySavedCollapsibleStates() {
 }
 
 // --- INLINE SECTION HEADING & ORDER AUTO-SAVE ---
+document.addEventListener('DOMContentLoaded', function () {
+    renumberBasketSections();
+});
 let sectionAutoSaveTimers = {};
 
 function showSectionSavedBadge(hash) {
@@ -3863,6 +4903,56 @@ function showSectionSavedBadge(hash) {
     badge._hideTimer = setTimeout(() => {
         badge.classList.remove('visible');
     }, 1800);
+}
+
+function renumberBasketSections() {
+    const tbodies = Array.from(document.querySelectorAll('#basket-section .basket-section-tbody'));
+    tbodies.forEach((tbody, index) => {
+        const order = index + 1;
+        const input = tbody.querySelector('.sec-order-input');
+        const letter = tbody.querySelector('.sec-order-badge');
+        const up = tbody.querySelector('.sec-sort-btn:first-child');
+        const down = tbody.querySelector('.sec-sort-btn:last-child');
+        if (input) input.value = order;
+        if (letter) letter.textContent = sectionOrderRoman(index);
+        if (up) up.disabled = index === 0;
+        if (down) down.disabled = index === tbodies.length - 1;
+    });
+}
+
+function sectionOrderRoman(index) {
+    let number = (Number(index) || 0) + 1;
+    const map = [
+        [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
+        [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
+        [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']
+    ];
+    let roman = '';
+    map.forEach(([value, symbol]) => {
+        while (number >= value) {
+            roman += symbol;
+            number -= value;
+        }
+    });
+    return roman;
+}
+
+function moveBasketSection(hash, direction) {
+    const tbody = document.querySelector('#basket-section .basket-section-tbody[data-section-hash="' + hash + '"]');
+    if (!tbody) return;
+    const all = Array.from(document.querySelectorAll('#basket-section .basket-section-tbody'));
+    const index = all.indexOf(tbody);
+    const newIndex = index + Number(direction);
+    if (index < 0 || newIndex < 0 || newIndex >= all.length) return;
+
+    if (direction < 0) {
+        tbody.parentNode.insertBefore(tbody, all[newIndex]);
+    } else {
+        tbody.parentNode.insertBefore(tbody, all[newIndex].nextSibling);
+    }
+
+    renumberBasketSections();
+    autoSaveSectionConfig(hash, true);
 }
 
 function autoSaveSectionConfig(hash, reloadLayoutOnOrderChange = false) {
@@ -4025,9 +5115,39 @@ function discardAndContinueAction() {
     }
 }
 
+function submitDirectSave(afterAction = '', afterTarget = '') {
+    if (!loadedPaperPath) return false;
+
+    clearExpandedSectionsMemory();
+    document.getElementById('hiddenCustomFilename').value = '';
+    document.getElementById('hiddenSaveTargetPath').value = loadedPaperPath;
+    document.getElementById('hiddenAfterSaveAction').value = afterAction || '';
+    document.getElementById('hiddenAfterSaveTarget').value = afterTarget || '';
+
+    const form = document.getElementById('export-form');
+    if (!form) return false;
+
+    const submitTrigger = document.createElement('input');
+    submitTrigger.type = 'hidden';
+    submitTrigger.name = 'save_json';
+    submitTrigger.value = '1';
+    form.appendChild(submitTrigger);
+    form.submit();
+    return true;
+}
+
 function openSaveModal() {
     pendingUnsavedAction = null;
     pendingUnsavedTarget = null;
+
+    // Only an actually loaded Question Paper may be saved silently.
+    // A new/cleared Question Paper must always show the filename dialog.
+    if (loadedPaperPath && loadedPaperPath.indexOf('saved_papers/') === 0) {
+        submitDirectSave();
+        return;
+    }
+
+    // A genuinely new Question Paper must get a filename from the user.
     const saveModal = document.getElementById('saveModal');
     const input = document.getElementById('customFileNameInput');
     if (saveModal) {
@@ -4047,6 +5167,17 @@ function closeSaveModal() {
 
 function saveAndContinueAction() {
     document.getElementById('unsavedBasketModal').style.display = 'none';
+
+    // If the current paper was loaded from a saved file, silently update that
+    // exact file and then continue with the pending action. New papers must ask for a name.
+    if (loadedPaperPath && loadedPaperPath.indexOf('saved_papers/') === 0) {
+        const action = pendingUnsavedAction || '';
+        const target = pendingUnsavedTarget || '';
+        submitDirectSave(action, target);
+        return;
+    }
+
+    // A new paper has no save target, so ask for its filename as before.
     const saveModal = document.getElementById('saveModal');
     const input = document.getElementById('customFileNameInput');
     if (saveModal) {
@@ -4058,22 +5189,27 @@ function saveAndContinueAction() {
 }
 
 function processSave() {
-    let rawName = document.getElementById('customFileNameInput').value.trim();
-    let safeName = rawName.replace(/[^A-Za-z0-9._ -]/g, '_').toLowerCase();
+    const input = document.getElementById('customFileNameInput');
+    const rawName = input ? input.value.trim() : '';
+    const safeName = rawName
+        .replace(/\.json$/i, '')
+        .replace(/[^A-Za-z0-9._ -]/g, '_')
+        .trim();
 
-    if (safeName !== '') {
-        if (existingFiles[currentDate] && existingFiles[currentDate].includes(safeName)) {
-            if (!confirm(`A file named "${safeName}.json" already exists in today's folder. Do you want to overwrite it?`)) {
-                return;
-            }
-        }
+    // Do not block the first save because of the old date-folder duplicate check.
+    // The server now owns the final filename and safely adds _1, _2, etc. if needed.
+    if (safeName === '') {
+        alert('Please enter a filename for the Question Paper.');
+        if (input) input.focus();
+        return;
     }
 
     if (pendingUnsavedAction) {
         clearExpandedSectionsMemory();
     }
 
-    document.getElementById('hiddenCustomFilename').value = rawName;
+    document.getElementById('hiddenCustomFilename').value = safeName;
+    document.getElementById('hiddenSaveTargetPath').value = '';
     document.getElementById('hiddenAfterSaveAction').value = pendingUnsavedAction || '';
     document.getElementById('hiddenAfterSaveTarget').value = pendingUnsavedTarget ?? '';
     document.getElementById('saveModal').style.display = 'none';
@@ -4148,20 +5284,42 @@ document.addEventListener("DOMContentLoaded", function() {
 
     const inputSchool = document.getElementById('input_school_name');
     const inputTitle = document.getElementById('input_paper_title');
-    const inputSubtitle = document.getElementById('input_paper_subtitle');
-
+    const inputClass = document.getElementById('input_class_name');
+    const inputSubject = document.getElementById('input_subject_name');
     const previewSchool = document.getElementById('preview_school_name');
     const previewTitle = document.getElementById('preview_paper_title');
-    const previewSubtitle = document.getElementById('preview_paper_subtitle');
-
+    const previewClass = document.getElementById('preview_class_name');
+    const previewSubject = document.getElementById('preview_subject_name');
     if (inputSchool && previewSchool) {
         inputSchool.addEventListener('input', e => { previewSchool.innerText = e.target.value.toUpperCase(); });
     }
     if (inputTitle && previewTitle) {
         inputTitle.addEventListener('input', e => { previewTitle.innerText = e.target.value.toUpperCase(); });
     }
-    if (inputSubtitle && previewSubtitle) {
-        inputSubtitle.addEventListener('input', e => { previewSubtitle.innerText = e.target.value; });
+    if (inputClass && previewClass) {
+        inputClass.addEventListener('input', e => { previewClass.innerText = 'Class: ' + e.target.value.toUpperCase(); });
+    }
+    if (inputSubject && previewSubject) {
+        inputSubject.addEventListener('input', e => { previewSubject.innerText = 'Subject: ' + e.target.value.toUpperCase(); });
+    }
+    // Keep all Document Preview & Export text configuration fields uppercase when saved.
+    const documentConfigInputs = [inputSchool, inputTitle, inputClass, inputSubject].filter(Boolean);
+    documentConfigInputs.forEach(function(input) {
+        input.addEventListener('input', function() {
+            const start = input.selectionStart;
+            const end = input.selectionEnd;
+            input.value = input.value.toUpperCase();
+            try { input.setSelectionRange(start, end); } catch (e) {}
+        });
+    });
+
+    const exportForm = document.getElementById('export-form');
+    if (exportForm) {
+        exportForm.addEventListener('submit', function() {
+            documentConfigInputs.forEach(function(input) {
+                input.value = input.value.toUpperCase();
+            });
+        });
     }
 
     // FEATURE 2: UI binding for Dynamic Font Update in Preview
@@ -4181,7 +5339,8 @@ document.addEventListener("DOMContentLoaded", function() {
 
             const previewEl = document.getElementById('preview_heading_' + hash);
             if (previewEl) {
-                previewEl.innerText = e.target.value;
+                const letter = previewEl.getAttribute('data-section-roman') || '';
+                previewEl.innerText = letter ? (letter + '. ' + e.target.value) : e.target.value;
             }
             const bpTh = document.getElementById('blueprint_th_' + hash);
             if (bpTh) {
@@ -4376,6 +5535,7 @@ document.addEventListener("DOMContentLoaded", function() {
 <?php if ($focusBasketId !== null && ! $scrollToPreview): ?>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+    if (window.qpgEditRestoreScrollY !== null) return;
     const targetRow = document.getElementById("basket-row-<?php echo h($focusBasketId) ?>");
     if (!targetRow) return;
     targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -4391,6 +5551,7 @@ document.addEventListener("DOMContentLoaded", function() {
 <?php if ($justEditedBankId !== null): ?>
 <script>
 (function () {
+    if (window.qpgEditRestoreScrollY !== null) return;
     const targetId = <?php echo json_encode((string) $justEditedBankId); ?>;
 
     function focusEditedAvailableQuestion() {
@@ -4460,9 +5621,32 @@ document.addEventListener("DOMContentLoaded", function() {
 </script>
 <?php endif; ?>
 
+<script>
+// Restore the viewport after Save/Cancel without smooth scrolling or focus jumps.
+(function () {
+    const restoreY = window.qpgEditRestoreScrollY;
+    if (restoreY === null || restoreY === undefined) return;
+
+    function restoreViewport() {
+        window.scrollTo({ top: restoreY, left: 0, behavior: 'auto' });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', restoreViewport, { once: true });
+    } else {
+        restoreViewport();
+    }
+
+    // CKEditor initialization can change layout after DOMContentLoaded; restore again.
+    setTimeout(restoreViewport, 50);
+    setTimeout(restoreViewport, 200);
+})();
+</script>
+
 <?php if ($scrollToBasket && $editingBasketId === null && ! $scrollToPreview): ?>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+    if (window.qpgEditRestoreScrollY !== null) return;
     const basketSec = document.getElementById("basket-section");
     if (basketSec) {
         basketSec.scrollIntoView({ behavior: "smooth", block: "start" });
