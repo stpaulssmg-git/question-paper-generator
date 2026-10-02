@@ -4266,7 +4266,15 @@ function handleCreateNewBankClick(event) {
 
         list.innerHTML = '';
         if (!filtered.length) {
-            list.style.display = 'none';
+            if (forceOpen && allValues.length) {
+                const empty = document.createElement('div');
+                empty.className = 'qb-autocomplete-empty';
+                empty.textContent = 'No matching XLSX value — you can enter a new value.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+            }
             return;
         }
 
@@ -4518,7 +4526,15 @@ function handleCreateNewBankClick(event) {
         list.innerHTML = '';
 
         if (!filtered.length) {
-            list.style.display = 'none';
+            if (forceOpen && values.length) {
+                const empty = document.createElement('div');
+                empty.className = 'qb-autocomplete-empty';
+                empty.textContent = 'No matching XLSX value — you can enter a new value.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+            }
             return;
         }
 
@@ -4662,7 +4678,15 @@ function handleCreateNewBankClick(event) {
         list.innerHTML = '';
 
         if (!filtered.length) {
-            list.style.display = 'none';
+            if (forceOpen && allValues.length) {
+                const empty = document.createElement('div');
+                empty.className = 'qb-autocomplete-empty';
+                empty.textContent = 'No matching XLSX value — you can enter a new value.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+            }
             return;
         }
 
