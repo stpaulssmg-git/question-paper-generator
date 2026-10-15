@@ -208,7 +208,11 @@
         use PhpOffice\PhpWord\IOFactory as WordIOFactory;
         use PhpOffice\PhpWord\PhpWord;
         use PhpOffice\PhpWord\Settings as WordSettings;
+        use PhpOffice\PhpWord\Element\Table as WordTable;
+        use PhpOffice\PhpWord\Element\TextRun as WordTextRun;
         use PhpOffice\PhpWord\Shared\Html as WordHtml;
+        use PhpOffice\PhpWord\Style\Paragraph as WordParagraph;
+        use PhpOffice\PhpWord\Style\Table as WordTableStyle;
         use PhpOffice\PhpWord\SimpleType\Jc;
 
         $loggedInUser = currentUser();
@@ -637,6 +641,24 @@
 
         function normalizeQuestionHtmlForWord(string $html): string
         {
+            $html = preg_replace_callback('/<table\b[^>]*>/i', function ($match) {
+                $tableTag = $match[0];
+                if (preg_match('/\bborder\s*=/i', $tableTag)) {
+                    return $tableTag;
+                }
+
+                if (preg_match('/\bstyle\s*=\s*(["\'])(.*?)\1/is', $tableTag, $styleMatch)) {
+                    if (preg_match('/\bborder(?:-(?:top|right|bottom|left))?(?:-(?:width|style|color))?\s*:/i', $styleMatch[2])) {
+                        return $tableTag;
+                    }
+
+                    $style = rtrim(trim($styleMatch[2]), ';') . ';border:1px #000000 solid';
+                    return str_replace($styleMatch[0], 'style=' . $styleMatch[1] . $style . $styleMatch[1], $tableTag);
+                }
+
+                return rtrim(substr($tableTag, 0, -1)) . ' style="border:1px #000000 solid">';
+            }, $html) ?? $html;
+
             return preg_replace_callback('/<(br|img)\b[^>]*>/i', function ($match) {
                 if (preg_match('/\/\s*>$/', $match[0])) {
                     return $match[0];
@@ -727,7 +749,7 @@
             // lists, block paragraphs, tables and embedded equation images.
             if ($rawQuestion !== '' && $rawQuestion !== strip_tags($rawQuestion)) {
                 $safeHtml     = sanitizeQuestionHtml($rawQuestion);
-                $numberMarkup = '<strong>' . h($number . '.') . '</strong>&nbsp;';
+                $numberMarkup = '<span style="font-weight:normal">' . h($number . '.') . '</span>&nbsp;';
                 if (preg_match('/^\s*<p\b/i', $safeHtml)) {
                     $questionHtml = preg_replace('/(<p\b[^>]*>)/i', '$1' . $numberMarkup, $safeHtml, 1) ?? $safeHtml;
                 } else {
@@ -737,7 +759,32 @@
                 $questionHtml = normalizeQuestionHtmlForWord($questionHtml);
 
                 try {
+                    $elementCount = count($section->getElements());
                     WordHtml::addHtml($section, $questionHtml, false, false);
+                    $isFirstTextRun = true;
+                    foreach (array_slice($section->getElements(), $elementCount) as $element) {
+                        if ($element instanceof WordTextRun) {
+                            $paragraphStyle = $element->getParagraphStyle();
+                            if ($paragraphStyle instanceof WordParagraph) {
+                                $paragraphStyle->setIndentation(
+                                    $isFirstTextRun
+                                        ? ['left' => 720, 'hanging' => 720]
+                                        : ['left' => 720]
+                                );
+                                $paragraphStyle->setSpaceAfter(max(60, (int) $paragraphStyle->getSpaceAfter()));
+                                $isFirstTextRun = false;
+                            }
+                        } elseif ($element instanceof WordTable) {
+                            $tableStyle = $element->getStyle();
+                            if ($tableStyle instanceof WordTableStyle) {
+                                $tableStyle->setIndent(new TblWidth(720, 'dxa'));
+                                $tableStyle->setCellMarginTop(60);
+                                $tableStyle->setCellMarginBottom(60);
+                                $tableStyle->setCellMarginLeft(100);
+                                $tableStyle->setCellMarginRight(100);
+                            }
+                        }
+                    }
                 } catch (Throwable $e) {
                     // Fallback for unusual HTML that PhpWord cannot parse.
                     $plain = html_entity_decode(strip_tags($safeHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8');
