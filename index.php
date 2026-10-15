@@ -768,8 +768,8 @@
                             if ($paragraphStyle instanceof WordParagraph) {
                                 $paragraphStyle->setIndentation(
                                     $isFirstTextRun
-                                        ? ['left' => 720, 'hanging' => 720]
-                                        : ['left' => 720]
+                                        ? ['left' => 480, 'hanging' => 480]
+                                        : ['left' => 480]
                                 );
                                 $paragraphStyle->setSpaceAfter(max(60, (int) $paragraphStyle->getSpaceAfter()));
                                 $isFirstTextRun = false;
@@ -777,7 +777,7 @@
                         } elseif ($element instanceof WordTable) {
                             $tableStyle = $element->getStyle();
                             if ($tableStyle instanceof WordTableStyle) {
-                                $tableStyle->setIndent(new TblWidth(720, 'dxa'));
+                                $tableStyle->setIndent(new TblWidth(480, 'dxa'));
                                 $tableStyle->setCellMarginTop(60);
                                 $tableStyle->setCellMarginBottom(60);
                                 $tableStyle->setCellMarginLeft(100);
@@ -799,7 +799,7 @@
                     $number . '. ' . cleanWordText($rawQuestion),
                     ['size' => 10],
                     ['spaceBefore' => 0, 'spaceAfter' => 0, 'lineHeight' => 1.0,
-                        'indentation'  => ['left' => 720, 'hanging' => 720]]
+                        'indentation'  => ['left' => 480, 'hanging' => 480]]
                 );
             }
 
@@ -823,7 +823,7 @@
                     'cellSpacing' => 0,
                     'width'       => 100 * 50,
                     'unit'        => 'pct',
-                    'indent'      => new TblWidth(720, 'dxa'),
+                    'indent'      => new TblWidth(480, 'dxa'),
                 ]);
 
                 $cellStyle = [
@@ -2589,7 +2589,7 @@
                                 'spaceBefore' => 0,
                                 'spaceAfter'  => 0,
                                 'lineHeight'  => 1.0,
-                                'indentation' => ['left' => 720, 'hanging' => 720],
+                                'indentation' => ['left' => 480, 'hanging' => 480],
                             ]
                         );
                     } else {
@@ -2793,7 +2793,7 @@ h3 { font-size: 16px; color: #333; margin-top: 0; margin-bottom: 10px; }
 .question-html-content th,
 .question-html-content td {
     border: 1px solid #bbb;
-    padding: 4px 8px;
+    padding: 4px 7px;
 }
 
 table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 8px; font-size: 15px; }
@@ -2986,8 +2986,8 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 .footer { text-align: center; margin-top: 30px; padding: 15px 0; border-top: 1px solid #ddd; font-size: 13px; color: #666; }
 
 /* Doc Preview Box Styles */
-.doc-preview-container { background: #dfe5f2; padding: 20px; border-radius: 7px; border: 1px solid #b8c2db; max-height: 600px; overflow-y: auto; position: relative; }
-.doc-preview-page { background: #fff; max-width: 800px; margin: 0 auto; padding: 40px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); font-family: Cambria, "Cambria Math", serif; line-height: 1.3; color: #000; position: relative; z-index: 2; text-align: left; }
+.doc-preview-container { background: #dfe5f2; padding: 20px; border-radius: 7px; border: 1px solid #b8c2db; overflow: visible; position: relative; touch-action: pan-y pinch-zoom; }
+.doc-preview-page { --doc-preview-page-width: 794px; background: #fff; box-sizing: border-box; width: var(--doc-preview-page-width); min-width: var(--doc-preview-page-width); min-height: 1123px; margin: 0 auto; padding: 48px 57px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); font-family: Cambria, "Cambria Math", serif; line-height: 1.3; color: #000; position: relative; z-index: 2; text-align: left; }
 .doc-preview-header { text-align: center; margin-bottom: 20px; }
 .doc-preview-school { font-size: 20px; font-weight: bold; }
 .doc-preview-title { font-size: 18px; font-weight: bold; margin-top: 6px; }
@@ -3000,11 +3000,11 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 .document-meta-preview span:nth-child(1) { text-align:left; }
 .document-meta-preview span:nth-child(2) { text-align:center; }
 .document-meta-preview span:nth-child(3) { text-align:right; }
-.doc-preview-category { font-weight: bold; font-size: 14px; margin: 15px 0 8px 0; text-transform: uppercase; text-align: left; }
+.doc-preview-category { font-weight: bold; font-size: 14px; margin: 15px 0 8px 0; text-align: left; }
 
 /* Left-justified question text and options */
-.doc-preview-q { display: flex; gap: 8px; margin-bottom: 6px; text-align: left; font-size: 10pt; }
-.doc-preview-qno { font-weight: bold; flex-shrink: 0; }
+.doc-preview-q { display: flex; gap: 0; margin-bottom: 6px; text-align: left; font-size: 10pt; }
+.doc-preview-qno { font-weight: normal; flex: 0 0 32px; }
 .doc-preview-text { flex-grow: 1; text-align: left; }
 .doc-preview-options { margin-top: 4px; margin-bottom: 2px; font-size: 9pt; width: 100%; text-align: left; }
 .doc-preview-option-row-1 { display: flex; gap: 10px; }
@@ -3022,7 +3022,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     body * { visibility: hidden; }
     .doc-preview-container, .doc-preview-container * { visibility: visible; }
     .doc-preview-container { position: absolute; left: 0; top: 0; width: 100%; max-height: none; background: transparent; padding: 0; border: none; overflow: visible; }
-    .doc-preview-page { padding: 0; box-shadow: none; max-width: 100%; width: 100%; margin: 0; text-align: left; }
+    .doc-preview-page { padding: 0; box-shadow: none; max-width: 100%; min-width: 0; width: 100%; margin: 0; text-align: left; zoom: 1 !important; }
     .doc-preview-q, .doc-preview-text, .doc-preview-options, .doc-preview-category { text-align: left !important; }
 }
 
@@ -3119,7 +3119,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
     .document-meta-preview span:nth-child(1) { text-align: left; }
     .document-meta-preview span:nth-child(2) { text-align: center; }
     .document-meta-preview span:nth-child(3) { text-align: right; }
-    .doc-preview-page { padding: 15px; }
+    .doc-preview-container { padding: 10px; }
     .modal-content, .teacher-modal { width: 95%; padding: 15px; }
     .teacher-modal-grid { grid-template-columns: 1fr; }
     div[style*="flex-wrap:wrap"] > button:not(.bulk-action-btn):not(.sec-collapse-btn) { width: 100%; flex: 1 1 100%; }
@@ -4077,9 +4077,10 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                     foreach ($groupedBasket as $sectionKey => $groupQuestions):
                         $hash                = md5($sectionKey);
                         $previewSectionRoman = sectionOrderRoman($previewSectionIndex++);
+                        $previewMarksSummary = getSectionMarksSummary($groupQuestions);
             ?>
                 <div class="doc-preview-category" id="preview_heading_<?php echo $hash ?>" data-section-roman="<?php echo h($previewSectionRoman) ?>">
-                    <?php echo h($previewSectionRoman . '. ' . getSectionHeading($sectionKey)) ?>
+                    <?php echo h($previewSectionRoman . '. ' . getSectionHeading($sectionKey) . ' ' . $previewMarksSummary) ?>
                 </div>
 
                 <?php foreach ($groupQuestions as $q): ?>
@@ -4093,10 +4094,14 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
                                             $optB   = trim($q['OptionB']);
                                             $optC   = trim($q['OptionC']);
                                             $optD   = trim($q['OptionD']);
-                                            $maxLen = max(strlen($optA), strlen($optB), strlen($optC), strlen($optD));
+                                            $optionLengths = array_map(
+                                                fn($option) => function_exists('mb_strlen') ? mb_strlen($option, 'UTF-8') : strlen($option),
+                                                [$optA, $optB, $optC, $optD]
+                                            );
+                                            $maxLen = max($optionLengths);
                             ?>
                                 <div class="doc-preview-options">
-                                    <?php if ($maxLen < 25): ?>
+                                    <?php if ($maxLen <= 22): ?>
                                         <div class="doc-preview-option-row-1">
                                             <span>(A) <?php echo h($optA) ?></span>
                                             <span>(B) <?php echo h($optB) ?></span>
@@ -4120,6 +4125,39 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
             </div>
         </div>
     </div>
+
+    <script>
+    (function () {
+        const container = document.getElementById('doc-preview-container');
+        const page = document.getElementById('doc_preview_block');
+        if (!container || !page) return;
+
+        let resizeFrame = 0;
+        function fitPreviewPage() {
+            resizeFrame = 0;
+            const styles = getComputedStyle(container);
+            const horizontalPadding = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+            const availableWidth = container.clientWidth - horizontalPadding;
+            const pageWidth = parseFloat(getComputedStyle(page).getPropertyValue('--doc-preview-page-width'));
+            if (availableWidth > 0 && pageWidth > 0) {
+                page.style.zoom = String(Math.min(1, availableWidth / pageWidth));
+            }
+        }
+
+        function schedulePreviewFit() {
+            if (!resizeFrame) {
+                resizeFrame = requestAnimationFrame(fitPreviewPage);
+            }
+        }
+
+        schedulePreviewFit();
+        if ('ResizeObserver' in window) {
+            new ResizeObserver(schedulePreviewFit).observe(container);
+        } else {
+            window.addEventListener('resize', schedulePreviewFit);
+        }
+    })();
+    </script>
 
     <br>
     <div style="display:flex; flex-wrap:wrap; gap:10px;">
