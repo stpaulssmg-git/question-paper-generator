@@ -1,4 +1,11 @@
 <?php
+    if (
+    ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' &&
+    (isset($_POST['export']) || isset($_POST['export_answers']))
+    ) {
+    ob_start();
+    }
+
     session_start();
 
     // --- 1. MULTI-USER AUTHENTICATION / STORAGE ---
@@ -200,6 +207,7 @@
         use PhpOffice\PhpWord\ComplexType\TblWidth;
         use PhpOffice\PhpWord\IOFactory as WordIOFactory;
         use PhpOffice\PhpWord\PhpWord;
+        use PhpOffice\PhpWord\Settings as WordSettings;
         use PhpOffice\PhpWord\Shared\Html as WordHtml;
         use PhpOffice\PhpWord\SimpleType\Jc;
 
@@ -627,6 +635,17 @@
             return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $text) ?? '';
         }
 
+        function normalizeQuestionHtmlForWord(string $html): string
+        {
+            return preg_replace_callback('/<(br|img)\b[^>]*>/i', function ($match) {
+                if (preg_match('/\/\s*>$/', $match[0])) {
+                    return $match[0];
+                }
+
+                return rtrim(substr($match[0], 0, -1)) . ' />';
+            }, $html) ?? $html;
+        }
+
         /**
          * Appends inline-formatted HTML or plain text to a PhpWord TextRun.
          */
@@ -708,9 +727,14 @@
             // lists, block paragraphs, tables and embedded equation images.
             if ($rawQuestion !== '' && $rawQuestion !== strip_tags($rawQuestion)) {
                 $safeHtml     = sanitizeQuestionHtml($rawQuestion);
-                $safeHtml     = preg_replace('/^\s*<p>(.*?)<\/p>\s*$/is', '$1', $safeHtml) ?? $safeHtml;
-                $questionHtml = '<p style="margin-left:36pt; margin-bottom:0pt; line-height:100%;"><strong>'
-                . h($number . '.') . '</strong>&nbsp;' . $safeHtml . '</p>';
+                $numberMarkup = '<strong>' . h($number . '.') . '</strong>&nbsp;';
+                if (preg_match('/^\s*<p\b/i', $safeHtml)) {
+                    $questionHtml = preg_replace('/(<p\b[^>]*>)/i', '$1' . $numberMarkup, $safeHtml, 1) ?? $safeHtml;
+                } else {
+                    $questionHtml = '<p style="margin-left:36pt; margin-bottom:0pt; line-height:100%;">'
+                        . $numberMarkup . '</p>' . $safeHtml;
+                }
+                $questionHtml = normalizeQuestionHtmlForWord($questionHtml);
 
                 try {
                     WordHtml::addHtml($section, $questionHtml, false, false);
@@ -2395,6 +2419,7 @@
                     $_SESSION['doc_config']['doc_font']     = $fontName;
 
                     $phpWord = new PhpWord();
+                    WordSettings::setOutputEscapingEnabled(true);
                     $phpWord->setDefaultFontName($fontName);
                     $phpWord->setDefaultFontSize(10);
 
@@ -2539,7 +2564,13 @@
                     // binary document to the browser. Any PHP warnings/notices must not
                     // be allowed to become part of the DOCX response.
                     $fileName = ($isAnswerKey ? 'AnswerKey_' : 'QuestionPaper_') . date('Ymd_His') . '.docx';
-                    $tempDocx = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $fileName;
+                    $tempDocx = tempnam(sys_get_temp_dir(), 'qpg_');
+
+                    if ($tempDocx === false) {
+                        $message     = 'Could not create a temporary file for the Word DOCX. Please check the server temporary folder permissions.';
+                        $messageType = 'error';
+                        goto docx_export_done;
+                    }
 
                     try {
                         $writer = WordIOFactory::createWriter($phpWord, 'Word2007');
