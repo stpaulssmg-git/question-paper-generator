@@ -2986,7 +2986,7 @@ input[type=checkbox] { transform: scale(1.2); cursor: pointer; margin: 0; }
 .footer { text-align: center; margin-top: 30px; padding: 15px 0; border-top: 1px solid #ddd; font-size: 13px; color: #666; }
 
 /* Doc Preview Box Styles */
-.doc-preview-container { background: #dfe5f2; padding: 20px; border-radius: 7px; border: 1px solid #b8c2db; overflow: visible; position: relative; touch-action: pan-y pinch-zoom; }
+.doc-preview-container { background: #dfe5f2; padding: 20px; border-radius: 7px; border: 1px solid #b8c2db; overflow: visible; position: relative; touch-action: auto; }
 .doc-preview-page { --doc-preview-page-width: 794px; background: #fff; box-sizing: border-box; width: var(--doc-preview-page-width); min-width: var(--doc-preview-page-width); min-height: 1123px; margin: 0 auto; padding: 48px 57px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); font-family: Cambria, "Cambria Math", serif; line-height: 1.3; color: #000; position: relative; z-index: 2; text-align: left; }
 .doc-preview-header { text-align: center; margin-bottom: 20px; }
 .doc-preview-school { font-size: 20px; font-weight: bold; }
